@@ -1,5 +1,6 @@
 /***************************************************************************
-* Copyright (c) 2016, Johan Mabille, Sylvain Corlay and Wolf Vollprecht    *
+* Copyright (c) Johan Mabille, Sylvain Corlay and Wolf Vollprecht          *
+* Copyright (c) QuantStack                                                 *
 *                                                                          *
 * Distributed under the terms of the BSD 3-Clause License.                 *
 *                                                                          *
@@ -53,7 +54,7 @@ namespace xt
             SCOPED_TRACE("copy constructor");
             adaptor_type b(a);
             compare_shape(a, b);
-            EXPECT_EQ(a.data(), b.data());
+            EXPECT_EQ(a.storage(), b.storage());
         }
 
         {
@@ -61,10 +62,10 @@ namespace xt
             row_major_result<> r;
             vec_type v2(r.size(), 0);
             adaptor_type c(v2, r.shape());
-            EXPECT_NE(a.data(), c.data());
+            EXPECT_NE(a.storage(), c.storage());
             c = a;
             compare_shape(a, c);
-            EXPECT_EQ(a.data(), c.data());
+            EXPECT_EQ(a.storage(), c.storage());
         }
     }
 
@@ -80,7 +81,7 @@ namespace xt
             adaptor_type tmp(a);
             adaptor_type b(std::move(tmp));
             compare_shape(a, b);
-            EXPECT_EQ(a.data(), b.data());
+            EXPECT_EQ(a.storage(), b.storage());
         }
 
         {
@@ -88,12 +89,19 @@ namespace xt
             row_major_result<> r;
             vec_type v2(r.size(), 0);
             adaptor_type c(v2, r.shape());
-            EXPECT_NE(a.data(), c.data());
+            EXPECT_NE(a.storage(), c.storage());
             adaptor_type tmp(a);
             c = std::move(tmp);
             compare_shape(a, c);
-            EXPECT_EQ(a.data(), c.data());
+            EXPECT_EQ(a.storage(), c.storage());
         }
+    }
+
+    TEST(xarray_adaptor, resize)
+    {
+        vec_type v;
+        adaptor_type a(v);
+        test_resize(a);
     }
 
     TEST(xarray_adaptor, reshape)
@@ -103,11 +111,20 @@ namespace xt
         test_reshape(a);
     }
 
+#if !(defined(XTENSOR_ENABLE_ASSERT) && defined(XTENSOR_DISABLE_EXCEPTIONS))
     TEST(xarray_adaptor, access)
     {
         vec_type v;
         adaptor_type a(v);
         test_access(a);
+    }
+#endif
+
+    TEST(xarray_adaptor, unchecked)
+    {
+        vec_type v;
+        adaptor_type a(v);
+        test_unchecked(a);
     }
 
     TEST(xarray_adaptor, at)
@@ -142,6 +159,13 @@ namespace xt
         test_iterator(arm, acm);
     }
 
+    TEST(xarray_adaptor, fill)
+    {
+        vec_type v;
+        adaptor_type a(v);
+        test_fill(a);
+    }
+
     TEST(xarray_adaptor, xiterator)
     {
         vec_type v;
@@ -154,5 +178,26 @@ namespace xt
         vec_type v;
         adaptor_type a(v);
         test_reverse_xiterator(a);
+    }
+
+    TEST(xarray_adaptor, adapt_std_array)
+    {
+        std::array<double, 9> a = {1, 2, 3, 4, 5, 6, 7, 8, 9};
+        xt::xarray_adaptor<decltype(a)> ad(a, xt::dynamic_shape<std::size_t>{3, 3});
+        EXPECT_EQ(ad(1, 1), 5.);
+        ad = ad * 2;
+        EXPECT_EQ(ad(1, 1), 10.);
+    }
+
+    TEST(xarray_adaptor, iterator_types)
+    {
+        using vec_type = std::vector<int>;
+        using array_type = xarray_adaptor<vec_type>;
+        using const_array_type = xarray_adaptor<const vec_type>;
+        using iterator = vec_type::iterator;
+        using const_iterator = vec_type::const_iterator;
+
+        test_iterator_types<array_type, iterator, const_iterator>();
+        test_iterator_types<const_array_type, const_iterator, const_iterator>();
     }
 }

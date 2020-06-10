@@ -13,18 +13,14 @@ Defined in ``xtensor/xstrided_view.hpp``
    :project: xtensor
    :members:
 
-.. doxygenfunction:: xt::strided_view
+.. doxygentypedef:: xt::xstrided_slice_vector
    :project: xtensor
 
-.. doxygenfunction:: xt::transpose(E&&)
+.. doxygenfunction:: xt::strided_view(E&&, S&&, X&&, std::size_t, layout_type)
    :project: xtensor
 
-.. doxygenfunction:: xt::transpose(E&&, S&&, Tag)
+.. doxygenfunction:: xt::strided_view(E&&, const xstrided_slice_vector&)
    :project: xtensor
 
-.. doxygenclass:: xt::slice_vector
-   :project: xtensor
-   :members:
-
-.. doxygenfunction:: xt::dynamic_view
+.. doxygenfunction:: xt::reshape_view(E&&, S&&, layout_type)
    :project: xtensor

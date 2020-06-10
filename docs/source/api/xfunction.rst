@@ -4,15 +4,6 @@
 
    The full license is in the file LICENSE, distributed with this software.
 
-xfunction_base
-==============
-
-Defined in ``xtensor/xfunction.hpp``
-
-.. doxygenclass:: xt::xfunction_base
-   :project: xtensor
-   :members:
-
 xfunction
 =========
 
@@ -22,11 +13,7 @@ Defined in ``xtensor/xfunction.hpp``
    :project: xtensor
    :members:
 
-xoptional_function
-==================
+Defined in ``xtensor/xmath.hpp``
 
-Defined in ``xtensor/xoptional.hpp``
-
-.. doxygenclass:: xt::xoptional_function
+.. doxygenfunction:: make_lambda_xfunction
    :project: xtensor
-   :members:

@@ -1,5 +1,6 @@
 /***************************************************************************
-* Copyright (c) 2016, Johan Mabille, Sylvain Corlay and Wolf Vollprecht    *
+* Copyright (c) Johan Mabille, Sylvain Corlay and Wolf Vollprecht          *
+* Copyright (c) QuantStack                                                 *
 *                                                                          *
 * Distributed under the terms of the BSD 3-Clause License.                 *
 *                                                                          *
@@ -18,7 +19,7 @@ namespace xt
         return d1 + d2;
     }
 
-    using shape_type = std::vector<size_t>;
+    using shape_type = dynamic_shape<size_t>;
 
     TEST(xvectorize, function)
     {

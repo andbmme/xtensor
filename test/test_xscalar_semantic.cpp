@@ -1,5 +1,6 @@
 /***************************************************************************
-* Copyright (c) 2016, Johan Mabille, Sylvain Corlay and Wolf Vollprecht    *
+* Copyright (c) Johan Mabille, Sylvain Corlay and Wolf Vollprecht          *
+* Copyright (c) QuantStack                                                 *
 *                                                                          *
 * Distributed under the terms of the BSD 3-Clause License.                 *
 *                                                                          *
@@ -24,11 +25,11 @@ namespace xt
     {
     public:
 
-        using container_type = C;
+        using storage_type = C;
     };
 
     using testing_types = ::testing::Types<xarray_dynamic, xtensor_dynamic>;
-    TYPED_TEST_CASE(scalar_semantic, testing_types);
+    TYPED_TEST_SUITE(scalar_semantic, testing_types);
 
     TYPED_TEST(scalar_semantic, a_plus_equal_b)
     {

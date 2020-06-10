@@ -1,5 +1,6 @@
 /***************************************************************************
-* Copyright (c) 2016, Johan Mabille, Sylvain Corlay and Wolf Vollprecht    *
+* Copyright (c) Johan Mabille, Sylvain Corlay and Wolf Vollprecht          *
+* Copyright (c) QuantStack                                                 *
 *                                                                          *
 * Distributed under the terms of the BSD 3-Clause License.                 *
 *                                                                          *
@@ -8,6 +9,7 @@
 
 #include "gtest/gtest.h"
 #include "xtensor/xarray.hpp"
+#include "xtensor/xadapt.hpp"
 #include "xtensor/xrandom.hpp"
 #include "xtensor/xindex_view.hpp"
 #include "xtensor/xbroadcast.hpp"
@@ -39,7 +41,7 @@ namespace xt
         EXPECT_EQ(expected, e(1, 1));
 
         auto t = v + 3;
-        EXPECT_EQ((e_copy(1, 1) + 6), t(0));
+		EXPECT_DOUBLE_EQ((e_copy(1, 1) + 6), t(0));
         EXPECT_EQ((e(1, 1) + 3), t(0));
 
         v = broadcast(123, v.shape());
@@ -71,6 +73,30 @@ namespace xt
         auto v2 = filter(e2, e2 > 0.5);
         v2 *= 0;
         EXPECT_TRUE(!any(e2 > 0.5));
+    }
+
+    TEST(xindex_view, access)
+    {
+        xarray<double> e = {{ 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 }};
+        auto v = filter(e, e > 0);
+        EXPECT_EQ(v(), v(0));
+        EXPECT_EQ(v(1, 2, 1), v(1));
+    }
+
+    TEST(xindex_view, fill)
+    {
+        xarray<double> e = { { 1, 0, 0 },{ 0, 1, 0 },{ 0, 0, 1 } };
+        xarray<double> res = { {1, 2, 2}, {2, 1, 2}, {2, 2, 1} };
+        auto v = filter(e, e < 1);
+        v.fill(2);
+        EXPECT_EQ(e, res);
+    }
+
+    TEST(xindex_view, unchecked)
+    {
+        xarray<double> e = { { 1, 0, 0 },{ 0, 1, 0 },{ 0, 0, 1 } };
+        auto v = filter(e, e > 0);
+        EXPECT_EQ(v.unchecked(1), v(1));
     }
 
     TEST(xindex_view, indices_on_function)
@@ -117,5 +143,38 @@ namespace xt
         filtration(a, a >= 5) += 2;
         xarray<double> expected = {{1, 7, 3}, {4, 7, 8}};
         EXPECT_EQ(expected, a);
+    }
+
+    TEST(xindex_view, filter)
+    {
+        xarray<double> a = {{ 1, 5, 3 },{ 4, 5, 6 }};
+        const xarray<double> b = {{ 1, 5, 3 },{ 4, 5, 6 }};
+        filter(a, a > 3) += filter(b, b > 3);
+        xarray<double> expected = {{ 1, 10, 3}, {8, 10, 12}};
+        EXPECT_EQ(expected, a);
+    }
+
+    TEST(xindex_view, filter_column_major)
+    {
+        xarray<int> a = {{{1, 3}, {2, 4}}, {{5, 7}, {6, 8}}};
+        xarray<bool> cond = {{{true, true}, {false, false}}, {{true, true}, {false, false}}};
+        
+        xarray<int> resc = xt::filter<xt::layout_type::column_major>(a, cond);
+        xarray<int> expc = {1, 5 ,3, 7};
+        EXPECT_EQ(resc, expc);
+
+        xarray<int> resr = xt::filter(a, cond);
+        xarray<int> expr = {1, 3 ,5, 7};
+        EXPECT_EQ(resr, expr);
+    }
+
+    TEST(xindex_view, const_adapt_filter)
+    {
+        const std::vector<double> av({1,2,3,4,5,6});
+        auto a = xt::adapt(av, std::array<std::size_t, 2>({3, 2}));
+        xt::xarray<double> b = {{1, 2, 3}, {4, 5, 6}};
+        xt::filter(b, b > 3) += xt::filter(a, a < 4);
+        xarray<double> expected = {{1, 2, 3}, {5, 7, 9}};
+        EXPECT_EQ(expected, b);
     }
 }

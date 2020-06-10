@@ -21,13 +21,28 @@ Defined in ``xtensor/xbuilder.hpp``
 .. doxygenfunction:: xt::zeros(const I (&)[L])
    :project: xtensor
 
+.. doxygenfunction:: xt::empty(const S&)
+   :project: xtensor
+
+.. doxygenfunction:: xt::full_like(const xexpression<E>&)
+   :project: xtensor
+
+.. doxygenfunction:: xt::empty_like(const xexpression<E>&)
+   :project: xtensor
+
+.. doxygenfunction:: xt::zeros_like(const xexpression<E>&)
+   :project: xtensor
+
+.. doxygenfunction:: xt::ones_like(const xexpression<E>&)
+   :project: xtensor
+
 .. doxygenfunction:: xt::eye(const std::vector<std::size_t>&, int)
    :project: xtensor
 
 .. doxygenfunction:: xt::eye(std::size_t, int)
    :project: xtensor
 
-.. doxygenfunction:: xt::arange(T, T, T)
+.. doxygenfunction:: xt::arange(T, T, S)
    :project: xtensor
 
 .. doxygenfunction:: xt::arange(T)
@@ -37,6 +52,21 @@ Defined in ``xtensor/xbuilder.hpp``
    :project: xtensor
 
 .. doxygenfunction:: xt::logspace
+   :project: xtensor
+
+.. doxygenfunction:: xt::concatenate(std::tuple<CT...>&&, std::size_t)
+   :project: xtensor
+
+.. doxygenfunction:: xt::stack
+   :project: xtensor
+
+.. doxygenfunction:: xt::hstack
+   :project: xtensor
+
+.. doxygenfunction:: xt::vstack
+   :project: xtensor
+
+.. doxygenfunction:: xt::meshgrid
    :project: xtensor
 
 .. doxygenfunction:: xt::diag
@@ -49,7 +79,4 @@ Defined in ``xtensor/xbuilder.hpp``
    :project: xtensor
 
 .. doxygenfunction:: xt::triu
-   :project: xtensor
-
-.. doxygenfunction:: xt::flip
    :project: xtensor

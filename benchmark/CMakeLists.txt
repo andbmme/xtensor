@@ -12,7 +12,7 @@ if (CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
     project(xtensor-benchmark)
 
     find_package(xtensor REQUIRED CONFIG)
-    set(XTENSOR_INCLUDE_DIR ${xtensor_INCLUDE_DIR})
+    set(XTENSOR_INCLUDE_DIR ${xtensor_INCLUDE_DIRS})
 endif ()
 
 message(STATUS "Forcing tests build type to Release")
@@ -23,7 +23,10 @@ include(CheckCXXCompilerFlag)
 string(TOUPPER "${CMAKE_BUILD_TYPE}" U_CMAKE_BUILD_TYPE)
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR CMAKE_CXX_COMPILER_ID MATCHES "Intel")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native -ffast-math -Wunused-parameter -Wextra -Wreorder")
+    if(NOT CMAKE_CXX_FLAGS MATCHES "-march")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native")
+    endif()
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -g -Wunused-parameter -Wextra -Wreorder")
     CHECK_CXX_COMPILER_FLAG("-std=c++14" HAS_CPP14_FLAG)
 
     if (HAS_CPP14_FLAG)
@@ -99,19 +102,36 @@ else()
     find_package(benchmark REQUIRED)
 endif()
 
-include_directories(${XTENSOR_INCLUDE_DIR} ${GBENCHMARK_INCLUDE_DIRS})
+find_package(xsimd)
+if (xsimd_FOUND)
+    include_directories(${xsimd_INCLUDE_DIRS})
+    add_definitions("-DXTENSOR_USE_XSIMD=1")
+endif()
+
+include_directories(${XTENSOR_INCLUDE_DIR})
+include_directories(${GBENCHMARK_INCLUDE_DIRS})
 
 set(XTENSOR_BENCHMARK
-    benchmark_assign.hpp
-    benchmark_container.hpp
-    benchmark_math.hpp
-    benchmark_views.hpp
+    benchmark_assign.cpp
+    benchmark_builder.cpp
+    benchmark_container.cpp
+    benchmark_creation.cpp
+    benchmark_increment_stepper.cpp
+    benchmark_lambda_expressions.cpp
+    benchmark_math.cpp
+    benchmark_random.cpp
+    benchmark_reducer.cpp
+    benchmark_views.cpp
+    benchmark_xshape.cpp
+    benchmark_view_access.cpp
+    benchmark_view_assignment.cpp
+    benchmark_view_adapt.cpp
     main.cpp
 )
 
 set(XTENSOR_BENCHMARK_TARGET benchmark_xtensor)
 add_executable(${XTENSOR_BENCHMARK_TARGET} EXCLUDE_FROM_ALL ${XTENSOR_BENCHMARK} ${XTENSOR_HEADERS})
-target_link_libraries(${XTENSOR_BENCHMARK_TARGET} ${GBENCHMARK_LIBRARIES})
+target_link_libraries(${XTENSOR_BENCHMARK_TARGET} xtensor ${GBENCHMARK_LIBRARIES})
 
 add_custom_target(xbenchmark
     COMMAND benchmark_xtensor
@@ -120,6 +140,6 @@ add_custom_target(xbenchmark
 add_custom_target(xpowerbench
     COMMAND echo "sudo needed to set cpu power governor to performance"
     COMMAND sudo cpupower frequency-set --governor performance
-    COMMAND benchmark_xtensor
+    COMMAND benchmark_xtensor --benchmark_out=results.csv --benchmark_out_format=csv
     COMMAND sudo cpupower frequency-set --governor powersave
     DEPENDS ${XTENSOR_BENCHMARK_TARGET})

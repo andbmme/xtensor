@@ -1,5 +1,6 @@
 /***************************************************************************
-* Copyright (c) 2016, Johan Mabille, Sylvain Corlay and Wolf Vollprecht    *
+* Copyright (c) Johan Mabille, Sylvain Corlay and Wolf Vollprecht          *
+* Copyright (c) QuantStack                                                 *
 *                                                                          *
 * Distributed under the terms of the BSD 3-Clause License.                 *
 *                                                                          *
@@ -11,146 +12,15 @@
 
 #include "gtest/gtest.h"
 #include "xtensor/xarray.hpp"
+#include "xtensor/xadapt.hpp"
+#include "xtensor/xoptional_assembly.hpp"
 #include "xtensor/xmath.hpp"
+#include "xtensor/xrandom.hpp"
 
 namespace xt
 {
     using std::size_t;
-    using shape_type = std::vector<size_t>;
-
-    /*******************
-     * type conversion *
-     *******************/
-
-#define CHECK_RESULT_TYPE(EXPRESSION, EXPECTED_TYPE)                                  \
-    {                                                                                \
-        using result_type = typename std::decay_t<decltype(EXPRESSION)>::value_type; \
-        EXPECT_TRUE((std::is_same<result_type, EXPECTED_TYPE>::value));              \
-    }
-
-    TEST(xmath, result_type)
-    {
-        shape_type shape = {3, 2};
-        xarray<unsigned char> auchar(shape);
-        xarray<short> ashort(shape);
-        xarray<int> aint(shape);
-        xarray<unsigned int> auint(shape);
-        xarray<unsigned long long> aulong(shape);
-        xarray<float> afloat(shape);
-        xarray<double> adouble(shape);
-        xarray<std::complex<float>> afcomplex(shape);
-        xarray<std::complex<double>> adcomplex(shape);
-
-        /*****************
-         * unsigned char *
-         *****************/
-        CHECK_RESULT_TYPE(auchar + auchar, int);
-        CHECK_RESULT_TYPE(2 * auchar, int);
-        CHECK_RESULT_TYPE(2.0 * auchar, double);
-        CHECK_RESULT_TYPE(sqrt(auchar), double);
-        CHECK_RESULT_TYPE(abs(auchar), int);
-        CHECK_RESULT_TYPE(sum(auchar), unsigned long long);
-        CHECK_RESULT_TYPE(mean(auchar), double);
-
-        /*********
-         * short *
-         *********/
-        CHECK_RESULT_TYPE(ashort + ashort, int);
-        CHECK_RESULT_TYPE(2 * ashort, int);
-        CHECK_RESULT_TYPE(2.0 * ashort, double);
-        CHECK_RESULT_TYPE(sqrt(ashort), double);
-        CHECK_RESULT_TYPE(abs(ashort), int);
-        CHECK_RESULT_TYPE(sum(ashort), long long);
-        CHECK_RESULT_TYPE(mean(ashort), double);
-
-        /*******
-         * int *
-         *******/
-        CHECK_RESULT_TYPE(aint + aint, int);
-        CHECK_RESULT_TYPE(2 * aint, int);
-        CHECK_RESULT_TYPE(2.0 * aint, double);
-        CHECK_RESULT_TYPE(sqrt(aint), double);
-        CHECK_RESULT_TYPE(abs(aint), int);
-        CHECK_RESULT_TYPE(sum(aint), long long);
-        CHECK_RESULT_TYPE(mean(aint), double);
-
-        /****************
-         * unsigned int *
-         ****************/
-        CHECK_RESULT_TYPE(auint + auint, unsigned int);
-        CHECK_RESULT_TYPE(2 * auint, unsigned int);
-        CHECK_RESULT_TYPE(2.0 * auint, double);
-        CHECK_RESULT_TYPE(sqrt(auint), double);
-        CHECK_RESULT_TYPE(abs(auint), unsigned int);
-        CHECK_RESULT_TYPE(sum(auint), unsigned long long);
-        CHECK_RESULT_TYPE(mean(auint), double);
-
-        /**********************
-         * unsigned long long *
-         **********************/
-        CHECK_RESULT_TYPE(aulong + aulong, unsigned long long);
-        CHECK_RESULT_TYPE(2 * aulong, unsigned long long);
-        CHECK_RESULT_TYPE(2.0 * aulong, double);
-        CHECK_RESULT_TYPE(sqrt(aulong), double);
-        CHECK_RESULT_TYPE(abs(aulong), unsigned long long);
-        CHECK_RESULT_TYPE(sum(aulong), unsigned long long);
-        CHECK_RESULT_TYPE(mean(aulong), double);
-
-        /*********
-         * float *
-         *********/
-        CHECK_RESULT_TYPE(afloat + afloat, float);
-        CHECK_RESULT_TYPE(2.0f * afloat, float);
-        CHECK_RESULT_TYPE(2.0 * afloat, double);
-        CHECK_RESULT_TYPE(sqrt(afloat), float);
-        CHECK_RESULT_TYPE(abs(afloat), float);
-        CHECK_RESULT_TYPE(sum(afloat), double);
-        CHECK_RESULT_TYPE(mean(afloat), double);
-
-        /**********
-         * double *
-         **********/
-        CHECK_RESULT_TYPE(adouble + adouble, double);
-        CHECK_RESULT_TYPE(2.0 * adouble, double);
-        CHECK_RESULT_TYPE(sqrt(adouble), double);
-        CHECK_RESULT_TYPE(abs(adouble), double);
-        CHECK_RESULT_TYPE(sum(adouble), double);
-        CHECK_RESULT_TYPE(mean(adouble), double);
-
-        /***********************
-         * std::complex<float> *
-         ***********************/
-        CHECK_RESULT_TYPE(afcomplex + afcomplex, std::complex<float>);
-        CHECK_RESULT_TYPE(std::complex<float>(2.0) * afcomplex, std::complex<float>);
-        CHECK_RESULT_TYPE(2.0f * afcomplex, std::complex<float>);
-        CHECK_RESULT_TYPE(sqrt(afcomplex), std::complex<float>);
-        CHECK_RESULT_TYPE(abs(afcomplex), float);
-        CHECK_RESULT_TYPE(sum(afcomplex), std::complex<double>);
-        CHECK_RESULT_TYPE(mean(afcomplex), std::complex<double>);
-
-        /************************
-         * std::complex<double> *
-         ************************/
-        CHECK_RESULT_TYPE(adcomplex + adcomplex, std::complex<double>);
-        CHECK_RESULT_TYPE(std::complex<double>(2.0) * adcomplex, std::complex<double>);
-        CHECK_RESULT_TYPE(2.0 * adcomplex, std::complex<double>);
-        CHECK_RESULT_TYPE(sqrt(adcomplex), std::complex<double>);
-        CHECK_RESULT_TYPE(abs(adcomplex), double);
-        CHECK_RESULT_TYPE(sum(adcomplex), std::complex<double>);
-        CHECK_RESULT_TYPE(mean(adcomplex), std::complex<double>);
-
-        /***************
-         * mixed types *
-         ***************/
-        CHECK_RESULT_TYPE(auchar + aint, int);
-        CHECK_RESULT_TYPE(ashort + aint, int);
-        CHECK_RESULT_TYPE(aulong + aint, unsigned long long);
-        CHECK_RESULT_TYPE(afloat + aint, float);
-        CHECK_RESULT_TYPE(adouble + aint, double);
-        CHECK_RESULT_TYPE(adouble + adcomplex, std::complex<double>);
-        CHECK_RESULT_TYPE(aulong + adouble, double);
-    }
-
+    using shape_type = dynamic_shape<size_t>;
 
     /********************
      * Basic operations *
@@ -159,8 +29,24 @@ namespace xt
     TEST(xmath, abs)
     {
         shape_type shape = {3, 2};
-        xarray<double> a(shape, 4.5);
+        xarray<double> a(shape, -4.5);
         EXPECT_EQ(abs(a)(0, 0), std::abs(a(0, 0)));
+
+        // check SIMD type deduction
+        xarray<double> res = xt::abs(a);
+
+        xarray<std::complex<double>> b(shape, std::complex<double>(1.2, 2.3));
+        EXPECT_EQ(abs(b)(0, 0), std::abs(b(0, 0)));
+
+        // check SIMD type deduction
+        xarray<double> res2 = xt::abs(b);
+
+        auto f = abs(b);
+        using assign_traits = xassign_traits<xarray<double>, decltype(f)>;
+
+#if XTENSOR_USE_XSIMD
+        EXPECT_TRUE(assign_traits::simd_linear_assign());
+#endif
     }
 
     TEST(xmath, fabs)
@@ -257,14 +143,82 @@ namespace xt
         EXPECT_EQ(fdim(sa, b)(0, 0), std::fdim(sa, b(0, 0)));
     }
 
+    TEST(xmath, amin_amax)
+    {
+        xarray<double> a{-10.0};
+        EXPECT_EQ(amin(a)[0], -10.0);
+        EXPECT_EQ(amax(a)[0], -10.0);
+
+        xarray<double> b{-10.0, -20.0};
+        EXPECT_EQ(amin(b)[0], -20.0);
+        EXPECT_EQ(amax(b)[0], -10.0);
+
+        xarray<double> c{-10.0, +20.0};
+        EXPECT_EQ(amin(c)[0], -10.0);
+        EXPECT_EQ(amax(c)[0], +20.0);
+
+        xarray<double> d{+10.0, +20.0};
+        EXPECT_EQ(amin(d)[0], +10.0);
+        EXPECT_EQ(amax(d)[0], +20.0);
+
+        xarray<double> e{+10.0};
+        EXPECT_EQ(amin(e)[0], +10.0);
+        EXPECT_EQ(amax(e)[0], +10.0);
+    }
+
+    TEST(xmath, minimum)
+    {
+        using opt_type = xoptional_assembly<xarray<double>, xarray<bool>>;
+        auto missing = xtl::missing<double>();
+
+        xarray<double> a = {1, 2, 3, 4, 5, 6};
+        xarray<double> b = {6, 5, 4, 3, 2, 1};
+        opt_type opt_a = {1, missing, 3, 4,       5, missing};
+        opt_type opt_b = {6,       5, 4, 3, missing,       1};
+
+        xarray<double> res = {1, 2, 3, 3, 2, 1};
+        EXPECT_EQ(res, minimum(a, b));
+
+        opt_type res1 = {1, missing, 3, 3, 2, missing};
+        EXPECT_EQ(res1, minimum(opt_a, b));
+
+        opt_type res2 = {1, missing, 3, 3, missing, missing};
+        EXPECT_EQ(res2, minimum(opt_a, opt_b));
+    }
+
+    TEST(xmath, maximum)
+    {
+        using opt_type = xoptional_assembly<xarray<double>, xarray<bool>>;
+        auto missing = xtl::missing<double>();
+
+        xarray<double> a = {1, 2, 3, 4, 5, 6};
+        xarray<double> b = {6, 5, 4, 3, 2, 1};
+        opt_type opt_a = {1, missing, 3, 4,       5, missing};
+        opt_type opt_b = {6,       5, 4, 3, missing,       1};
+
+        xarray<double> res = {6, 5, 4, 4, 5, 6};
+        EXPECT_EQ(res, maximum(a, b));
+
+        opt_type res1 = {6, missing, 4, 4, 5, missing};
+        EXPECT_EQ(res1, maximum(opt_a, b));
+
+        opt_type res2 = {6, missing, 4, 4, missing, missing};
+        EXPECT_EQ(res2, maximum(opt_a, opt_b));
+    }
+
     TEST(xmath, clip)
     {
-        shape_type shape = {3, 2};
-        xarray<double> a = {1, 2, 3, 4, 5, 6};
-        xarray<double> res = {2, 2, 3, 4, 4, 4};
+        using opt_type = xoptional_assembly<xarray<double>, xarray<bool>>;
+        auto missing = xtl::missing<double>();
 
-        xarray<double> clipped = clip(a, 2.0, 4.0);
-        EXPECT_EQ(res, clipped);
+        xarray<double> a = {1, 2, 3, 4, 5, 6};
+        opt_type opt_a = {1, missing, 3, 4, 5, missing};
+
+        xarray<double> res = {2, 2, 3, 4, 4, 4};
+        EXPECT_EQ(res, clip(a, 2.0, 4.0));
+
+        opt_type res1 = {2, missing, 3, 4, 4, missing};
+        EXPECT_EQ(res1, clip(opt_a, 2.0, 4.0));
     }
 
     TEST(xmath, sign)
@@ -327,9 +281,100 @@ namespace xt
         EXPECT_TRUE(all(equal(expected, xt::isnan(arr))));
     }
 
+    TEST(xmath, deg2rad)
+    {
+        xarray<double> arr
+            {-180, -135, -90, -45, 0, 45, 90, 135, 180};
+        xarray<double> expected
+            {-3.141593, -2.356194, -1.570796, -0.785398,  0.,
+              0.785398,  1.570796,  2.356194,  3.141593};
+        EXPECT_TRUE(all(isclose(expected, xt::deg2rad(arr))));
+    }
+
+    TEST(xmath, radians)
+    {
+        xarray<double> arr
+            {-180, -135, -90, -45, 0, 45, 90, 135, 180};
+        xarray<double> expected
+            {-3.141593, -2.356194, -1.570796, -0.785398,  0.,
+             0.785398,  1.570796,  2.356194,  3.141593};
+        EXPECT_TRUE(all(isclose(expected, xt::radians(arr))));
+    }
+
+    TEST(xmath, rad2deg)
+    {
+        xarray<double> arr
+            {-3.141593, -2.356194, -1.570796, -0.785398,  0.,
+             0.785398,  1.570796,  2.356194,  3.141593};
+        xarray<double> expected
+            {-180, -135, -90, -45, 0, 45, 90, 135, 180};
+        EXPECT_TRUE(all(isclose(expected, xt::rad2deg(arr))));
+    }
+
+    TEST(xmath, degrees)
+    {
+        xarray<double> arr
+            {-3.141593, -2.356194, -1.570796, -0.785398,  0.,
+             0.785398,  1.570796,  2.356194,  3.141593};
+        xarray<double> expected
+            {-180, -135, -90, -45, 0, 45, 90, 135, 180};
+        EXPECT_TRUE(all(isclose(expected, xt::degrees(arr))));
+    }
+
     /*************************
      * Exponential functions *
      *************************/
+
+    TEST(xmath, assign_traits)
+    {
+        using array_type = xarray<double>;
+        array_type a = { {1.2, 2.3}, {3.4, 4.5} };
+
+        {
+            SCOPED_TRACE("unary function");
+            auto fexp = exp(a);
+            using assign_traits = xassign_traits<array_type, decltype(fexp)>;
+#if XTENSOR_USE_XSIMD
+            EXPECT_TRUE(assign_traits::simd_linear_assign());
+#else
+            // SFINAE on load_simd is broken on mingw when xsimd is disabled. This using
+            // triggers the same error as the one caught by mingw.
+            using return_type = decltype(fexp.template load_simd<aligned_mode>(std::size_t(0)));
+            EXPECT_FALSE(assign_traits::simd_linear_assign());
+            EXPECT_TRUE((std::is_same<return_type, double>::value));
+#endif
+        }
+
+        {
+            SCOPED_TRACE("binary function");
+            auto fpow = pow(a, a);
+            using assign_traits = xassign_traits<array_type, decltype(fpow)>;
+#if XTENSOR_USE_XSIMD
+            EXPECT_TRUE(assign_traits::simd_linear_assign());
+#else
+            // SFINAE on load_simd is broken on mingw when xsimd is disabled. This using
+            // triggers the same error as the one caught by mingw.
+            using return_type = decltype(fpow.template load_simd<aligned_mode>(std::size_t(0)));
+            EXPECT_FALSE(assign_traits::simd_linear_assign());
+            EXPECT_TRUE((std::is_same<return_type, double>::value));
+#endif
+        }
+
+        {
+            SCOPED_TRACE("ternary function");
+            auto ffma = xt::fma(a, a, a);
+            using assign_traits = xassign_traits<array_type, decltype(ffma)>;
+#if XTENSOR_USE_XSIMD
+            EXPECT_TRUE(assign_traits::simd_linear_assign());
+#else
+            // SFINAE on load_simd is broken on mingw when xsimd is disabled. This using
+            // triggers the same error as the one caught by mingw.
+            using return_type = decltype(ffma.template load_simd<aligned_mode>(std::size_t(0)));
+            EXPECT_FALSE(assign_traits::simd_linear_assign());
+            EXPECT_TRUE((std::is_same<return_type, double>::value));
+#endif
+        }
+    }
 
     TEST(xmath, exp)
     {
@@ -396,6 +441,70 @@ namespace xt
         shape_type shape = {3, 2};
         xarray<double> a(shape, 3.7);
         EXPECT_EQ(sqrt(a)(0, 0), std::sqrt(a(0, 0)));
+    }
+
+    TEST(xmath, square)
+    {
+        shape_type shape = {3, 2};
+        xarray<double> a(shape, 3.7);
+        EXPECT_EQ(square(a)(0, 0), (a(0, 0) * a(0, 0)));
+        xarray<double> b = square(a);
+        xarray<double> exp = a * a;
+        EXPECT_EQ(b, exp);
+
+        auto f = square(a);
+
+#if XTENSOR_USE_XSIMD
+        using assign_traits = xassign_traits<xarray<double>, decltype(f)>;
+        EXPECT_TRUE(assign_traits::simd_linear_assign());
+#endif
+    }
+
+    TEST(xmath, integer_pow)
+    {
+        shape_type shape = {3, 2};
+        xarray<double> a(shape, 3);
+
+        xarray<double> b = pow<16>(a);
+        xarray<double> exp = pow(a, 16);
+        EXPECT_TRUE(allclose(exp, b));
+
+        b = pow<1>(a);
+        exp = pow(a, 1);
+        EXPECT_TRUE(allclose(exp, b));
+        b = pow<2>(a);
+        exp = pow(a, 2);
+        EXPECT_TRUE(allclose(exp, b));
+        b = pow<3>(a);
+        exp = pow(a, 3);
+        EXPECT_TRUE(allclose(exp, b));
+        b = pow<4>(a);
+        exp = pow(a, 4);
+        EXPECT_TRUE(allclose(exp, b));
+        b = pow<5>(a);
+        exp = pow(a, 5);
+        EXPECT_TRUE(allclose(exp, b));
+        b = pow<13>(a);
+        exp = pow(a, 13);
+        EXPECT_TRUE(allclose(exp, b));
+
+        auto f = pow<13>(a);
+
+#if XTENSOR_USE_XSIMD
+        using assign_traits = xassign_traits<xarray<double>, decltype(f)>;
+        EXPECT_TRUE(assign_traits::simd_linear_assign());
+#endif
+
+    }
+
+    TEST(xmath, cube)
+    {
+        shape_type shape = {3, 2};
+        xarray<double> a(shape, 3.7);
+        EXPECT_EQ(cube(a)(0, 0), (a(0, 0) * a(0, 0) * a(0, 0)));
+        xarray<double> b = cube(a);
+        xarray<double> exp = a * a * a;
+        EXPECT_EQ(b, exp);
     }
 
     TEST(xmath, cbrt)
@@ -636,11 +745,11 @@ namespace xt
     {
         EXPECT_EQ(math::abs(1ul), 1ul);
         EXPECT_EQ(math::abs(1u), 1u);
-        EXPECT_EQ(math::abs((unsigned char) 1), (unsigned char) 1);
-        EXPECT_EQ(math::abs((char) 1), 1);
-        EXPECT_EQ(math::abs((int) 1), 1);
-        EXPECT_EQ(math::abs((int) -1), 1);
-        EXPECT_EQ(math::abs((long) -1), (long) 1);
+        EXPECT_EQ(math::abs(static_cast<unsigned char>(1)), static_cast<unsigned char>(1));
+        EXPECT_EQ(math::abs(char(1)), 1);
+        EXPECT_EQ(math::abs(int(1)), 1);
+        EXPECT_EQ(math::abs(int(-1)), 1);
+        EXPECT_EQ(math::abs(long(-1)), long(1));
         EXPECT_EQ(math::abs(-1.5), 1.5);
     }
 
@@ -661,5 +770,114 @@ namespace xt
         EXPECT_EQ(res, std::atan(arg));
         bool close = ::xt::isclose(1.0, 1.0);
         EXPECT_EQ(close, true);
+
+        auto p = ::xt::numeric_constants<>::PI;
+        EXPECT_EQ(p, 3.141592653589793238463);
+    }
+
+    TEST(xmath, count_nonzero)
+    {
+        xarray<double> a = {{1, 2, 3, 4}, {0, 0, 0, 0}, {3, 0, 1, 0}};
+        std::size_t as = count_nonzero(a)();
+        std::size_t ase = count_nonzero(a, evaluation_strategy::immediate)();
+        EXPECT_EQ(as, 6u);
+        EXPECT_EQ(ase, 6u);
+
+        xarray<std::size_t> ea0 = {2, 1, 2, 1};
+        xarray<std::size_t> ea1 = {4, 0, 2};
+
+        EXPECT_EQ(count_nonzero(a, {0}), ea0);
+        EXPECT_EQ(count_nonzero(a, {1}), ea1);
+
+        EXPECT_EQ(count_nonzero(a, {0}, evaluation_strategy::immediate), ea0);
+        EXPECT_EQ(count_nonzero(a, {1}, evaluation_strategy::immediate), ea1);
+
+        a = random::randint<int>({5, 5, 5, 5, 5}, 10);
+        auto lm = count_nonzero(a, {0, 1, 3}, evaluation_strategy::immediate);
+        auto lz = count_nonzero(a, {0, 1, 3});
+        EXPECT_EQ(lm, lz);
+    }
+
+    TEST(xmath, diff)
+    {
+        xt::xarray<int> a = {1, 2, 4, 7, 0};
+        xt::xarray<int> expected1 = {1,  2,  3, -7};
+        EXPECT_EQ(xt::diff(a), expected1);
+        xt::xarray<int> expected2 = {1, 1, -10};
+        EXPECT_EQ(xt::diff(a, 2), expected2);
+
+        xt::xarray<int> b = {{1, 3, 6, 10}, {0, 5, 6, 8}};
+        xt::xarray<int> expected3 = {{2, 3, 4}, {5, 1, 2}};
+        EXPECT_EQ(xt::diff(b), expected3);
+        xt::xarray<int> expected4 = {{-1, 2, 0, -2}};
+        EXPECT_EQ(xt::diff(b, 1, 0), expected4);
+
+        xt::xarray<bool> c = {{true, false, true}, {true, true, true}};
+        xt::xarray<bool> expected6 = {{true, true}, {false, false}};
+        EXPECT_EQ(xt::diff(c, 1), expected6);
+        xt::xarray<bool> expected7({2, 1}, false);
+        EXPECT_EQ(xt::diff(c, 2), expected7);
+
+        std::vector<int> d = { 1, 2, 4, 7, 0 };
+        xt::xarray<int> orig = { 1, 2, 4, 7, 0 };
+        auto ad = xt::adapt(d);
+        EXPECT_EQ(xt::diff(ad), expected1);
+        EXPECT_EQ(ad, orig);
+
+        xt::xarray<int> e = {1, 2};
+        auto expected8 = xt::xarray<int>::from_shape({0});
+        EXPECT_EQ(xt::diff(e, 2), expected8);
+        EXPECT_EQ(xt::diff(e, 5), expected8);
+    }
+
+    TEST(xmath, trapz)
+    {
+        xt::xarray<int> a = {{0, 1, 2},
+                             {3, 4, 5}};
+        xt::xarray<double> expected1 = {1.5, 2.5, 3.5};
+        EXPECT_EQ(trapz(a, 1.0, 0), expected1);
+
+        xt::xarray<double> expected2 = {2.0, 8.0};
+        EXPECT_EQ(trapz(a, 1.0, -1), expected2);
+
+        xt::xarray<int> b = {1, 2, 3};
+        auto res3 = trapz(b);
+        EXPECT_EQ(res3[0], 4.0);
+
+        xt::xarray<int> c = {1, 2, 3};
+        auto res4 = trapz(c, 2.0);
+        EXPECT_EQ(res4[0], 8.0);
+
+        xt::xarray<int> d = {1, 2, 3};
+        xt::xarray<int> d_x = {4, 6, 8};
+        auto res5 = trapz(d, d_x);
+        EXPECT_EQ(res5[0], 8.0);
+    }
+
+    /************************
+     * Linear interpolation *
+     ************************/
+
+    TEST(xmath, interp)
+    {
+        xt::xtensor<double,1> xp = {0.0, 1.0, 3.0};
+        xt::xtensor<double,1> fp = {0.0, 1.0, 3.0};
+        xt::xtensor<double,1> x  = {0.0, .5, 1.0, 1.5, 2.0, 2.5, 3.0};
+
+        auto f = xt::interp(x,xp,fp);
+
+        for ( std::size_t i = 0 ; i < x.size() ; ++i )
+        {
+            EXPECT_EQ(f[i], x[i]);
+        }
+    }
+
+    TEST(xmath, cov)
+    {
+        xt::xarray<double> x = {0.0, 1.0, 2.0};
+        xt::xarray<double> y = {2.0, 1.0, 0.0};
+        xt::xarray<double> expected = {{1.0, -1.0}, {-1.0, 1.0}};
+
+        EXPECT_EQ(expected, xt::cov(x, y));
     }
 }

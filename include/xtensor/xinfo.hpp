@@ -1,5 +1,6 @@
 /***************************************************************************
-* Copyright (c) 2016, Johan Mabille, Sylvain Corlay and Wolf Vollprecht    *
+* Copyright (c) Johan Mabille, Sylvain Corlay and Wolf Vollprecht          *
+* Copyright (c) QuantStack                                                 *
 *                                                                          *
 * Distributed under the terms of the BSD 3-Clause License.                 *
 *                                                                          *
@@ -91,7 +92,6 @@ namespace xt
     std::string info(const T& t)
     {
         std::string s;
-        using shape_type = typename T::shape_type;
         s += "\nValue type: " + type_to_string<typename T::value_type>();
         s += "\nLayout: ";
         if (t.layout() == layout_type::row_major)

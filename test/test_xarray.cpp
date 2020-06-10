@@ -1,5 +1,6 @@
 /***************************************************************************
-* Copyright (c) 2016, Johan Mabille, Sylvain Corlay and Wolf Vollprecht    *
+* Copyright (c) Johan Mabille, Sylvain Corlay and Wolf Vollprecht          *
+* Copyright (c) QuantStack                                                 *
 *                                                                          *
 * Distributed under the terms of the BSD 3-Clause License.                 *
 *                                                                          *
@@ -8,8 +9,11 @@
 
 #include "gtest/gtest.h"
 #include "xtensor/xarray.hpp"
+#include "xtensor/xtensor.hpp"
+#include "xtensor/xmanipulation.hpp"
 #include "xtensor/xio.hpp"
 #include "test_common.hpp"
+#include <type_traits>
 
 namespace xt
 {
@@ -58,8 +62,8 @@ namespace xt
             int value = 2;
             xarray_dynamic ra(rm.m_shape, value, layout_type::row_major);
             compare_shape(ra, rm);
-            xarray_dynamic::container_type vec(ra.size(), value);
-            EXPECT_EQ(ra.data(), vec);
+            xarray_dynamic::storage_type vec(ra.size(), value);
+            EXPECT_EQ(ra.storage(), vec);
         }
 
         {
@@ -68,8 +72,8 @@ namespace xt
             int value = 2;
             xarray<int, layout_type::column_major> ca(cm.m_shape, value);
             compare_shape(ca, cm);
-            xarray_dynamic::container_type vec(ca.size(), value);
-            EXPECT_EQ(ca.data(), vec);
+            xarray_dynamic::storage_type vec(ca.size(), value);
+            EXPECT_EQ(ca.storage(), vec);
         }
     }
 
@@ -79,8 +83,8 @@ namespace xt
         int value = 2;
         xarray<int, layout_type::dynamic> cma(cmr.m_shape, cmr.m_strides, value);
         compare_shape(cma, cmr);
-        xarray_dynamic::container_type vec(cma.size(), value);
-        EXPECT_EQ(cma.data(), vec);
+        xarray_dynamic::storage_type vec(cma.size(), value);
+        EXPECT_EQ(cma.storage(), vec);
     }
 
     TEST(xarray, xscalar_constructor)
@@ -100,17 +104,17 @@ namespace xt
             SCOPED_TRACE("copy constructor");
             xarray_dynamic b(a);
             compare_shape(a, b);
-            EXPECT_EQ(a.data(), b.data());
+            EXPECT_EQ(a.storage(), b.storage());
         }
 
         {
             SCOPED_TRACE("assignment operator");
             row_major_result<> r;
             xarray_dynamic c(r.m_shape, 0);
-            EXPECT_NE(a.data(), c.data());
+            EXPECT_NE(a.storage(), c.storage());
             c = a;
             compare_shape(a, c);
-            EXPECT_EQ(a.data(), c.data());
+            EXPECT_EQ(a.storage(), c.storage());
         }
     }
 
@@ -125,25 +129,32 @@ namespace xt
             xarray_dynamic tmp(a);
             xarray_dynamic b(std::move(tmp));
             compare_shape(a, b);
-            EXPECT_EQ(a.data(), b.data());
+            EXPECT_EQ(a.storage(), b.storage());
         }
 
         {
             SCOPED_TRACE("move assignment");
             row_major_result<> r;
             xarray_dynamic c(r.m_shape, 0);
-            EXPECT_NE(a.data(), c.data());
+            EXPECT_NE(a.storage(), c.storage());
             xarray_dynamic tmp(a);
             c = std::move(tmp);
             compare_shape(a, c);
-            EXPECT_EQ(a.data(), c.data());
+            EXPECT_EQ(a.storage(), c.storage());
         }
+    }
+
+    TEST(xarray, resize)
+    {
+        xarray_dynamic a;
+        test_resize(a);
     }
 
     TEST(xarray, reshape)
     {
         xarray_dynamic a;
         test_reshape(a);
+        test_throwing_reshape(a);
     }
 
     TEST(xarray, transpose)
@@ -165,10 +176,18 @@ namespace xt
         EXPECT_EQ(res(3, 0), 1.f);
     }
 
+#if !(defined(XTENSOR_ENABLE_ASSERT) && defined(XTENSOR_DISABLE_EXCEPTIONS))
     TEST(xarray, access)
     {
         xarray_dynamic a;
         test_access(a);
+    }
+#endif
+
+    TEST(xarray, unchecked)
+    {
+        xarray_dynamic a;
+        test_unchecked(a);
     }
 
     TEST(xarray, at)
@@ -177,11 +196,13 @@ namespace xt
         test_at(a);
     }
 
+#if !(defined(XTENSOR_ENABLE_ASSERT) && defined(XTENSOR_DISABLE_EXCEPTIONS))
     TEST(xarray, element)
     {
         xarray_dynamic a;
         test_element(a);
     }
+#endif
 
     TEST(xarray, indexed_access)
     {
@@ -203,6 +224,12 @@ namespace xt
         test_iterator(arm, acm);
     }
 
+    TEST(xarray, fill)
+    {
+        xarray_dynamic a;
+        test_fill(a);
+    }
+
     TEST(xarray, initializer_list)
     {
         xarray_dynamic a0(1);
@@ -216,11 +243,16 @@ namespace xt
     TEST(xarray, zerod)
     {
         xarray_dynamic a;
+        EXPECT_EQ(0u, a.dimension());
         EXPECT_EQ(0, a());
 
         xarray_dynamic b = {1, 2, 3};
         xarray_dynamic c(2 + xt::sum(b));
         EXPECT_EQ(8, c());
+
+        EXPECT_EQ(8, c(1, 2));
+        xindex idx = { 1, 2 };
+        EXPECT_EQ(8, c.element(idx.cbegin(), idx.cend()));
     }
 
     TEST(xarray, xiterator)
@@ -253,5 +285,97 @@ namespace xt
     {
         xarray_dynamic a = {1};
         EXPECT_FALSE((a.begin() == a.end()));
+    }
+
+    TEST(xarray, move_from_xtensor)
+    {
+        xtensor<double, 3> a = {{{1,2,3}, {4,5,6}}, {{10, 10, 10}, {1,5,10}}};
+        xtensor<double, 3> a1 = a;
+        xarray<double> b(std::move(a1));
+        EXPECT_EQ(a, b);
+        EXPECT_TRUE(std::equal(a.strides().begin(), a.strides().end(), b.strides().begin()) && a.strides().size() == b.strides().size());
+        EXPECT_TRUE(std::equal(a.backstrides().begin(), a.backstrides().end(), b.backstrides().begin()) && a.backstrides().size() == b.backstrides().size());
+        EXPECT_EQ(a.layout(), b.layout());
+
+        xtensor<double, 3> a2 = a;
+        xarray<double> c;
+        c = std::move(a2);
+
+        EXPECT_EQ(a, c);
+        EXPECT_TRUE(std::equal(a.strides().begin(), a.strides().end(), c.strides().begin()) && a.strides().size() == c.strides().size());
+        EXPECT_TRUE(std::equal(a.backstrides().begin(), a.backstrides().end(), c.backstrides().begin()) && a.backstrides().size() == c.backstrides().size());
+        EXPECT_EQ(a.layout(), c.layout());
+    }
+
+    TEST(xarray, periodic)
+    {
+        xt::xarray<size_t> a = {{0,1,2}, {3,4,5}};
+        xt::xarray<size_t> b = {{0,1,2}, {30,40,50}};
+        a.periodic(-1,3) = 30;
+        a.periodic(-1,4) = 40;
+        a.periodic(-1,5) = 50;
+        EXPECT_EQ(a, b);
+    }
+
+    TEST(xarray, in_bounds)
+    {
+        xt::xarray<size_t> a = {{0,1,2}, {3,4,5}};
+        EXPECT_TRUE(a.in_bounds(0,0) == true);
+        EXPECT_TRUE(a.in_bounds(2,0) == false);
+    }
+
+    TEST(xarray, iterator_types)
+    {
+        using array_type = xarray<int>;
+        test_iterator_types<array_type, int*, const int*>();
+    }
+
+    auto test_reshape_compile() {
+        xt::xarray<double> a = xt::zeros<double>({5, 5});
+        return a.reshape({1, 25});
+    }
+
+    TEST(xarray, reshape_return)
+    {
+        auto a = test_reshape_compile();
+        EXPECT_EQ(a.shape(), std::vector<std::size_t>({1, 25}));
+    }
+
+    TEST(xarray, type_traits)
+    {
+        using array_type = xt::xarray<double>;
+        EXPECT_TRUE(std::is_constructible<array_type>::value);
+
+        EXPECT_TRUE(std::is_default_constructible<array_type>::value);
+
+        EXPECT_TRUE(std::is_copy_constructible<array_type>::value);
+
+        EXPECT_TRUE(std::is_move_constructible<array_type>::value);
+        EXPECT_TRUE(std::is_nothrow_move_constructible<array_type>::value);
+
+        EXPECT_TRUE(std::is_copy_assignable<array_type>::value);
+
+        EXPECT_TRUE(std::is_move_assignable<array_type>::value);
+        EXPECT_TRUE(std::is_nothrow_move_assignable<array_type>::value);
+
+        EXPECT_TRUE(std::is_destructible<array_type>::value);
+        EXPECT_TRUE(std::is_nothrow_destructible<array_type>::value);
+    }
+
+    TEST(xarray, bool_container)
+    {
+        xt::xarray<int> a{1, 0, 1, 0}, b{1, 1, 0, 0};
+
+        xt::xarray<bool> c = a & b;
+        EXPECT_TRUE(c(0));
+        EXPECT_FALSE(c(1));
+        EXPECT_FALSE(c(2));
+        EXPECT_FALSE(c(3));
+
+        xt::xarray<bool> d = a | b;
+        EXPECT_TRUE(d(0));
+        EXPECT_TRUE(d(1));
+        EXPECT_TRUE(d(2));
+        EXPECT_FALSE(d(3));
     }
 }

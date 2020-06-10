@@ -1,5 +1,6 @@
-/***************************************************************************
-* Copyright (c) 2016, Johan Mabille, Sylvain Corlay and Wolf Vollprecht    *
+﻿/***************************************************************************
+* Copyright (c) Johan Mabille, Sylvain Corlay and Wolf Vollprecht          *
+* Copyright (c) QuantStack                                                 *
 *                                                                          *
 * Distributed under the terms of the BSD 3-Clause License.                 *
 *                                                                          *
@@ -9,19 +10,27 @@
 /**
  * @brief standard mathematical functions for xexpressions
  */
-\
+
 #ifndef XTENSOR_MATH_HPP
 #define XTENSOR_MATH_HPP
 
 #include <cmath>
+#include <algorithm>
+#include <array>
 #include <complex>
 #include <type_traits>
 
+#include <xtl/xcomplex.hpp>
+#include <xtl/xtype_traits.hpp>
+
+#include "xaccumulator.hpp"
+#include "xeval.hpp"
+#include "xmanipulation.hpp"
 #include "xoperation.hpp"
 #include "xreducer.hpp"
-#include "xaccumulator.hpp"
-
-#include "xtl/xcomplex.hpp"
+#include "xslice.hpp"
+#include "xstrided_view.hpp"
+#include "xtensor_config.hpp"
 
 namespace xt
 {
@@ -46,170 +55,100 @@ namespace xt
      * Helpers *
      ***********/
 
-#define UNSIGNED_ABS_FUNC(T)                                                     \
-constexpr inline T abs(const T& x)                                               \
-{                                                                                \
-    return x;                                                                    \
-}                                                                                \
+#define XTENSOR_UNSIGNED_ABS_FUNC(T)                                              \
+constexpr inline T abs(const T& x)                                                \
+{                                                                                 \
+    return x;                                                                     \
+}                                                                                 \
 
-#define INT_SPECIALIZATION_IMPL(FUNC_NAME, RETURN_VAL, T)                        \
-constexpr inline bool FUNC_NAME(const T& /*x*/) noexcept                         \
-{                                                                                \
-    return RETURN_VAL;                                                           \
-}                                                                                \
+#define XTENSOR_INT_SPECIALIZATION_IMPL(FUNC_NAME, RETURN_VAL, T)                 \
+constexpr inline bool FUNC_NAME(const T& /*x*/) noexcept                          \
+{                                                                                 \
+    return RETURN_VAL;                                                            \
+}                                                                                 \
 
-#define INT_SPECIALIZATION(FUNC_NAME, RETURN_VAL)                                \
-INT_SPECIALIZATION_IMPL(FUNC_NAME, RETURN_VAL, char);                            \
-INT_SPECIALIZATION_IMPL(FUNC_NAME, RETURN_VAL, short);                           \
-INT_SPECIALIZATION_IMPL(FUNC_NAME, RETURN_VAL, int);                             \
-INT_SPECIALIZATION_IMPL(FUNC_NAME, RETURN_VAL, long);                            \
-INT_SPECIALIZATION_IMPL(FUNC_NAME, RETURN_VAL, long long);                       \
-INT_SPECIALIZATION_IMPL(FUNC_NAME, RETURN_VAL, unsigned char);                   \
-INT_SPECIALIZATION_IMPL(FUNC_NAME, RETURN_VAL, unsigned short);                  \
-INT_SPECIALIZATION_IMPL(FUNC_NAME, RETURN_VAL, unsigned int);                    \
-INT_SPECIALIZATION_IMPL(FUNC_NAME, RETURN_VAL, unsigned long);                   \
-INT_SPECIALIZATION_IMPL(FUNC_NAME, RETURN_VAL, unsigned long long);              \
+#define XTENSOR_INT_SPECIALIZATION(FUNC_NAME, RETURN_VAL)                         \
+XTENSOR_INT_SPECIALIZATION_IMPL(FUNC_NAME, RETURN_VAL, char);                     \
+XTENSOR_INT_SPECIALIZATION_IMPL(FUNC_NAME, RETURN_VAL, short);                    \
+XTENSOR_INT_SPECIALIZATION_IMPL(FUNC_NAME, RETURN_VAL, int);                      \
+XTENSOR_INT_SPECIALIZATION_IMPL(FUNC_NAME, RETURN_VAL, long);                     \
+XTENSOR_INT_SPECIALIZATION_IMPL(FUNC_NAME, RETURN_VAL, long long);                \
+XTENSOR_INT_SPECIALIZATION_IMPL(FUNC_NAME, RETURN_VAL, unsigned char);            \
+XTENSOR_INT_SPECIALIZATION_IMPL(FUNC_NAME, RETURN_VAL, unsigned short);           \
+XTENSOR_INT_SPECIALIZATION_IMPL(FUNC_NAME, RETURN_VAL, unsigned int);             \
+XTENSOR_INT_SPECIALIZATION_IMPL(FUNC_NAME, RETURN_VAL, unsigned long);            \
+XTENSOR_INT_SPECIALIZATION_IMPL(FUNC_NAME, RETURN_VAL, unsigned long long);       \
 
 
-#define UNARY_MATH_FUNCTOR_IMPL(NAME, R)                                         \
-    template <class T>                                                           \
-    struct NAME##_fun                                                            \
-    {                                                                            \
-        static auto exec(const T& arg)                                           \
-        {                                                                        \
-            using math::NAME;                                                    \
-            return NAME(arg);                                                    \
-        }                                                                        \
-        using return_type = xt::detail::functor_return_type<T, R>;               \
-        using argument_type = T;                                                 \
-        using result_type = decltype(exec(*(T*)0));                              \
-        using simd_value_type = xsimd::simd_type<T>;                             \
-        using simd_result_type = typename return_type::simd_type;                \
-        constexpr result_type operator()(const T& arg) const                     \
-        {                                                                        \
-            using math::NAME;                                                    \
-            return NAME(arg);                                                    \
-        }                                                                        \
-        constexpr simd_result_type simd_apply(const simd_value_type& arg) const  \
-        {                                                                        \
-            using math::NAME;                                                    \
-            return NAME(arg);                                                    \
-        }                                                                        \
-        template <class U>                                                       \
-        struct rebind                                                            \
-        {                                                                        \
-            using type = NAME##_fun<U>;                                          \
-        };                                                                       \
+#define XTENSOR_UNARY_MATH_FUNCTOR(NAME)                                          \
+    struct NAME##_fun                                                             \
+    {                                                                             \
+        template <class T>                                                        \
+        constexpr auto operator()(const T& arg) const                             \
+        {                                                                         \
+            using math::NAME;                                                     \
+            return NAME(arg);                                                     \
+        }                                                                         \
+        template <class B>                                                        \
+        constexpr auto simd_apply(const B& arg) const                             \
+        {                                                                         \
+            using math::NAME;                                                     \
+            return NAME(arg);                                                     \
+        }                                                                         \
     }
 
-#define UNARY_MATH_FUNCTOR(NAME) UNARY_MATH_FUNCTOR_IMPL(NAME, T)
-#define UNARY_BOOL_FUNCTOR(NAME) UNARY_MATH_FUNCTOR_IMPL(NAME, bool)
-
-#define UNARY_MATH_FUNCTOR_COMPLEX_REDUCING(NAME)                                \
-    template <class T>                                                           \
-    struct NAME##_fun                                                            \
-    {                                                                            \
-        static auto exec(const T& arg)                                           \
-        {                                                                        \
-            using math::NAME;                                                    \
-            return NAME(arg);                                                    \
-        }                                                                        \
-        using argument_type = T;                                                 \
-        using result_type = decltype(exec(*(T*)0));                              \
-        using simd_value_type = argument_type;                                   \
-        using simd_result_type = result_type;                                    \
-        constexpr result_type operator()(const T& arg) const                     \
-        {                                                                        \
-            using math::NAME;                                                    \
-            return NAME(arg);                                                    \
-        }                                                                        \
-        constexpr simd_result_type simd_apply(const simd_value_type& arg) const  \
-        {                                                                        \
-            using math::NAME;                                                    \
-            return NAME(arg);                                                    \
-        }                                                                        \
-        template <class U>                                                       \
-        struct rebind                                                            \
-        {                                                                        \
-            using type = NAME##_fun<U>;                                          \
-        };                                                                       \
+#define XTENSOR_UNARY_MATH_FUNCTOR_COMPLEX_REDUCING(NAME)                         \
+    struct NAME##_fun                                                             \
+    {                                                                             \
+        template <class T>                                                        \
+        constexpr auto operator()(const T& arg) const                             \
+        {                                                                         \
+            using math::NAME;                                                     \
+            return NAME(arg);                                                     \
+        }                                                                         \
+        template <class B>                                                        \
+        constexpr auto simd_apply(const B& arg) const                             \
+        {                                                                         \
+            using math::NAME;                                                     \
+            return NAME(arg);                                                     \
+        }                                                                         \
     }
 
-#define BINARY_MATH_FUNCTOR_IMPL(NAME, R)                                        \
-    template <class T>                                                           \
-    struct NAME##_fun                                                            \
-    {                                                                            \
-        static auto exec(const T& arg1, const T& arg2)                           \
-        {                                                                        \
-            using math::NAME;                                                    \
-            return NAME(arg1, arg2);                                             \
-        }                                                                        \
-        using return_type = xt::detail::functor_return_type<T, R>;               \
-        using first_argument_type = T;                                           \
-        using second_argument_type = T;                                          \
-        using result_type = decltype(exec(*(T*)0, *(T*)0));                      \
-        using simd_value_type = xsimd::simd_type<T>;                             \
-        using simd_result_type = typename return_type::simd_type;                \
-        constexpr result_type operator()(const T& arg1, const T& arg2) const     \
-        {                                                                        \
-            using math::NAME;                                                    \
-            return NAME(arg1, arg2);                                             \
-        }                                                                        \
-        constexpr simd_result_type simd_apply(const simd_value_type& arg1,       \
-                                              const simd_value_type& arg2) const \
-        {                                                                        \
-            using math::NAME;                                                    \
-            return NAME(arg1, arg2);                                             \
-        }                                                                        \
-        template <class U>                                                       \
-        struct rebind                                                            \
-        {                                                                        \
-            using type = NAME##_fun<U>;                                          \
-        };                                                                       \
+#define XTENSOR_BINARY_MATH_FUNCTOR(NAME)                                         \
+    struct NAME##_fun                                                             \
+    {                                                                             \
+        template <class T1, class T2>                                             \
+        constexpr auto operator()(const T1& arg1, const T2& arg2) const           \
+        {                                                                         \
+            using math::NAME;                                                     \
+            return NAME(arg1, arg2);                                              \
+        }                                                                         \
+        template <class B>                                                        \
+        constexpr auto simd_apply(const B& arg1, const B& arg2) const             \
+        {                                                                         \
+            using math::NAME;                                                     \
+            return NAME(arg1, arg2);                                              \
+        }                                                                         \
     }
 
-#define BINARY_MATH_FUNCTOR(NAME) BINARY_MATH_FUNCTOR_IMPL(NAME, T)
-#define BINARY_BOOL_FUNCTOR(NAME) BINARY_MATH_FUNCTOR_IMPL(NAME, bool)
-
-#define TERNARY_MATH_FUNCTOR_IMPL(NAME, R)                                       \
-    template <class T>                                                           \
-    struct NAME##_fun                                                            \
-    {                                                                            \
-        static auto exec(const T& arg1, const T& arg2, const T& arg3)            \
-        {                                                                        \
-            using math::NAME;                                                    \
-            return NAME(arg1, arg2, arg3);                                       \
-        }                                                                        \
-        using return_type = xt::detail::functor_return_type<T, R>;               \
-        using first_argument_type = T;                                           \
-        using second_argument_type = T;                                          \
-        using third_argument_type = T;                                           \
-        using result_type = decltype(exec(*(T*)0, *(T*)0, *(T*)0));              \
-        using simd_value_type = xsimd::simd_type<T>;                             \
-        using simd_result_type = typename return_type::simd_type;                \
-        constexpr result_type operator()(const T& arg1,                          \
-                                         const T& arg2,                          \
-                                         const T& arg3) const                    \
-        {                                                                        \
-            using math::NAME;                                                    \
-            return NAME(arg1, arg2, arg3);                                       \
-        }                                                                        \
-        constexpr simd_result_type simd_apply(const simd_value_type& arg1,       \
-                                              const simd_value_type& arg2,       \
-                                              const simd_value_type& arg3) const \
-        {                                                                        \
-            using math::NAME;                                                    \
-            return NAME(arg1, arg2, arg3);                                       \
-        }                                                                        \
-        template <class U>                                                       \
-        struct rebind                                                            \
-        {                                                                        \
-            using type = NAME##_fun<U>;                                          \
-        };                                                                       \
+#define XTENSOR_TERNARY_MATH_FUNCTOR(NAME)                                        \
+    struct NAME##_fun                                                             \
+    {                                                                             \
+        template <class T1, class T2, class T3>                                   \
+        constexpr auto operator()(const T1& arg1,                                 \
+                                  const T2& arg2,                                 \
+                                  const T3& arg3) const                           \
+        {                                                                         \
+            using math::NAME;                                                     \
+            return NAME(arg1, arg2, arg3);                                        \
+        }                                                                         \
+        template <class B>                                                        \
+        auto simd_apply(const B& arg1, const B& arg2, const B& arg3) const        \
+        {                                                                         \
+            using math::NAME;                                                     \
+            return NAME(arg1, arg2, arg3);                                        \
+        }                                                                         \
     }
-
-#define TERNARY_MATH_FUNCTOR(NAME) TERNARY_MATH_FUNCTOR_IMPL(NAME, T)
-#define TERNARY_BOOL_FUNCTOR(NAME) TERNARY_MATH_FUNCTOR_IMPL(NAME, bool)
 
     namespace math
     {
@@ -265,7 +204,11 @@ INT_SPECIALIZATION_IMPL(FUNC_NAME, RETURN_VAL, unsigned long long);             
         using std::arg;
 
         using std::atan2;
+
+// copysign is not in the std namespace for MSVC
+#if !defined(_MSC_VER)
         using std::copysign;
+#endif
         using std::fdim;
         using std::fmax;
         using std::fmin;
@@ -274,11 +217,31 @@ INT_SPECIALIZATION_IMPL(FUNC_NAME, RETURN_VAL, unsigned long long);             
         using std::pow;
 
         using std::fma;
-
-        using std::isnan;
-        using std::isinf;
-        using std::isfinite;
         using std::fpclassify;
+
+        // Overload isinf, isnan and isfinite because glibc implementation
+        // might return int instead of bool and the SIMD detection requires
+        // bool return type.
+        template <class T>
+        inline std::enable_if_t<std::is_arithmetic<T>::value, bool>
+        isinf(const T& t)
+        {
+            return bool(std::isinf(t));
+        }
+
+        template <class T>
+        inline std::enable_if_t<std::is_arithmetic<T>::value, bool>
+        isnan(const T& t)
+        {
+            return bool(std::isnan(t));
+        }
+
+        template <class T>
+        inline std::enable_if_t<std::is_arithmetic<T>::value, bool>
+        isfinite(const T& t)
+        {
+            return bool(std::isfinite(t));
+        }
 
         // Overload isinf, isnan and isfinite for complex datatypes,
         // following the Python specification:
@@ -300,117 +263,161 @@ INT_SPECIALIZATION_IMPL(FUNC_NAME, RETURN_VAL, unsigned long long);             
             return !isinf(c) && !isnan(c);
         }
 
+        // VS2015 STL defines isnan, isinf and isfinite as template
+        // functions, breaking ADL.
+#if defined(_WIN32) && defined(XTENSOR_USE_XSIMD)
+        template <class T, std::size_t N>
+        inline xsimd::batch_bool<T, N> isinf(const xsimd::batch<T, N>& b)
+        {
+            return xsimd::isinf(b);
+        }
+        template <class T, std::size_t N>
+        inline xsimd::batch_bool<T, N> isnan(const xsimd::batch<T, N>& b)
+        {
+            return xsimd::isnan(b);
+        }
+        template <class T, std::size_t N>
+        inline xsimd::batch_bool<T, N> isfinite(const xsimd::batch<T, N>& b)
+        {
+            return xsimd::isfinite(b);
+        }
+#endif
         // The following specializations are needed to avoid 'ambiguous overload' errors,
         // whereas 'unsigned char' and 'unsigned short' are automatically converted to 'int'.
-        UNSIGNED_ABS_FUNC(unsigned int);
-        UNSIGNED_ABS_FUNC(unsigned long);
-        UNSIGNED_ABS_FUNC(unsigned long long);
+        // we're still adding those functions to silence warnings
+        XTENSOR_UNSIGNED_ABS_FUNC(unsigned char)
+        XTENSOR_UNSIGNED_ABS_FUNC(unsigned short)
+        XTENSOR_UNSIGNED_ABS_FUNC(unsigned int)
+        XTENSOR_UNSIGNED_ABS_FUNC(unsigned long)
+        XTENSOR_UNSIGNED_ABS_FUNC(unsigned long long)
 
 #ifdef _WIN32
-        INT_SPECIALIZATION(isinf, false);
-        INT_SPECIALIZATION(isnan, false);
-        INT_SPECIALIZATION(isfinite, true);
+        XTENSOR_INT_SPECIALIZATION(isinf, false);
+        XTENSOR_INT_SPECIALIZATION(isnan, false);
+        XTENSOR_INT_SPECIALIZATION(isfinite, true);
 #endif
 
-        UNARY_MATH_FUNCTOR_COMPLEX_REDUCING(abs);
+        XTENSOR_UNARY_MATH_FUNCTOR_COMPLEX_REDUCING(abs);
 
-        UNARY_MATH_FUNCTOR(fabs);
-        BINARY_MATH_FUNCTOR(fmod);
-        BINARY_MATH_FUNCTOR(remainder);
-        TERNARY_MATH_FUNCTOR(fma);
-        BINARY_MATH_FUNCTOR(fmax);
-        BINARY_MATH_FUNCTOR(fmin);
-        BINARY_MATH_FUNCTOR(fdim);
-        UNARY_MATH_FUNCTOR(exp);
-        UNARY_MATH_FUNCTOR(exp2);
-        UNARY_MATH_FUNCTOR(expm1);
-        UNARY_MATH_FUNCTOR(log);
-        UNARY_MATH_FUNCTOR(log10);
-        UNARY_MATH_FUNCTOR(log2);
-        UNARY_MATH_FUNCTOR(log1p);
-        BINARY_MATH_FUNCTOR(pow);
-        UNARY_MATH_FUNCTOR(sqrt);
-        UNARY_MATH_FUNCTOR(cbrt);
-        BINARY_MATH_FUNCTOR(hypot);
-        UNARY_MATH_FUNCTOR(sin);
-        UNARY_MATH_FUNCTOR(cos);
-        UNARY_MATH_FUNCTOR(tan);
-        UNARY_MATH_FUNCTOR(asin);
-        UNARY_MATH_FUNCTOR(acos);
-        UNARY_MATH_FUNCTOR(atan);
-        BINARY_MATH_FUNCTOR(atan2);
-        UNARY_MATH_FUNCTOR(sinh);
-        UNARY_MATH_FUNCTOR(cosh);
-        UNARY_MATH_FUNCTOR(tanh);
-        UNARY_MATH_FUNCTOR(asinh);
-        UNARY_MATH_FUNCTOR(acosh);
-        UNARY_MATH_FUNCTOR(atanh);
-        UNARY_MATH_FUNCTOR(erf);
-        UNARY_MATH_FUNCTOR(erfc);
-        UNARY_MATH_FUNCTOR(tgamma);
-        UNARY_MATH_FUNCTOR(lgamma);
-        UNARY_MATH_FUNCTOR(ceil);
-        UNARY_MATH_FUNCTOR(floor);
-        UNARY_MATH_FUNCTOR(trunc);
-        UNARY_MATH_FUNCTOR(round);
-        UNARY_MATH_FUNCTOR(nearbyint);
-        UNARY_MATH_FUNCTOR(rint);
-        UNARY_BOOL_FUNCTOR(isfinite);
-        UNARY_BOOL_FUNCTOR(isinf);
-        UNARY_BOOL_FUNCTOR(isnan);
+        XTENSOR_UNARY_MATH_FUNCTOR(fabs);
+        XTENSOR_BINARY_MATH_FUNCTOR(fmod);
+        XTENSOR_BINARY_MATH_FUNCTOR(remainder);
+        XTENSOR_TERNARY_MATH_FUNCTOR(fma);
+        XTENSOR_BINARY_MATH_FUNCTOR(fmax);
+        XTENSOR_BINARY_MATH_FUNCTOR(fmin);
+        XTENSOR_BINARY_MATH_FUNCTOR(fdim);
+        XTENSOR_UNARY_MATH_FUNCTOR(exp);
+        XTENSOR_UNARY_MATH_FUNCTOR(exp2);
+        XTENSOR_UNARY_MATH_FUNCTOR(expm1);
+        XTENSOR_UNARY_MATH_FUNCTOR(log);
+        XTENSOR_UNARY_MATH_FUNCTOR(log10);
+        XTENSOR_UNARY_MATH_FUNCTOR(log2);
+        XTENSOR_UNARY_MATH_FUNCTOR(log1p);
+        XTENSOR_BINARY_MATH_FUNCTOR(pow);
+        XTENSOR_UNARY_MATH_FUNCTOR(sqrt);
+        XTENSOR_UNARY_MATH_FUNCTOR(cbrt);
+        XTENSOR_BINARY_MATH_FUNCTOR(hypot);
+        XTENSOR_UNARY_MATH_FUNCTOR(sin);
+        XTENSOR_UNARY_MATH_FUNCTOR(cos);
+        XTENSOR_UNARY_MATH_FUNCTOR(tan);
+        XTENSOR_UNARY_MATH_FUNCTOR(asin);
+        XTENSOR_UNARY_MATH_FUNCTOR(acos);
+        XTENSOR_UNARY_MATH_FUNCTOR(atan);
+        XTENSOR_BINARY_MATH_FUNCTOR(atan2);
+        XTENSOR_UNARY_MATH_FUNCTOR(sinh);
+        XTENSOR_UNARY_MATH_FUNCTOR(cosh);
+        XTENSOR_UNARY_MATH_FUNCTOR(tanh);
+        XTENSOR_UNARY_MATH_FUNCTOR(asinh);
+        XTENSOR_UNARY_MATH_FUNCTOR(acosh);
+        XTENSOR_UNARY_MATH_FUNCTOR(atanh);
+        XTENSOR_UNARY_MATH_FUNCTOR(erf);
+        XTENSOR_UNARY_MATH_FUNCTOR(erfc);
+        XTENSOR_UNARY_MATH_FUNCTOR(tgamma);
+        XTENSOR_UNARY_MATH_FUNCTOR(lgamma);
+        XTENSOR_UNARY_MATH_FUNCTOR(ceil);
+        XTENSOR_UNARY_MATH_FUNCTOR(floor);
+        XTENSOR_UNARY_MATH_FUNCTOR(trunc);
+        XTENSOR_UNARY_MATH_FUNCTOR(round);
+        XTENSOR_UNARY_MATH_FUNCTOR(nearbyint);
+        XTENSOR_UNARY_MATH_FUNCTOR(rint);
+        XTENSOR_UNARY_MATH_FUNCTOR(isfinite);
+        XTENSOR_UNARY_MATH_FUNCTOR(isinf);
+        XTENSOR_UNARY_MATH_FUNCTOR(isnan);
     }
 
-#undef UNARY_MATH_FUNCTOR
-#undef UNARY_BOOL_FUNCTOR
-#undef UNARY_MATH_FUNCTOR_IMPL
-#undef BINARY_MATH_FUNCTOR
-#undef BINARY_BOOL_FUNCTOR
-#undef BINARY_MATH_FUNCTOR_IMPL
-#undef TERNARY_MATH_FUNCTOR
-#undef TERNARY_BOOL_FUNCTOR
-#undef TERNARY_MATH_FUNCTOR_IMPL
-#undef UNARY_MATH_FUNCTOR_COMPLEX_REDUCING
-#undef UNSIGNED_ABS_FUNCTOR
-#undef UNSIGNED_ABS_FUNC
+#undef XTENSOR_UNARY_MATH_FUNCTOR
+#undef XTENSOR_BINARY_MATH_FUNCTOR
+#undef XTENSOR_TERNARY_MATH_FUNCTOR
+#undef XTENSOR_UNARY_MATH_FUNCTOR_COMPLEX_REDUCING
+#undef XTENSOR_UNSIGNED_ABS_FUNC
 
-#define REDUCER_FUNCTION(NAME, FUNCTOR, RESULT_TYPE)                                                              \
-    template <class E, class X, class ES = DEFAULT_STRATEGY_REDUCERS,                                             \
-              class = std::enable_if_t<!std::is_base_of<evaluation_strategy::base, std::decay_t<X>>::value, int>> \
-    inline auto NAME(E&& e, X&& axes, ES es = ES()) noexcept                                                      \
+namespace detail {
+    template <class R, class T>
+    std::enable_if_t<!has_iterator_interface<R>::value, R> fill_init(T init) {
+        return R(init);
+    }
+
+    template <class R, class T>
+    std::enable_if_t<has_iterator_interface<R>::value, R> fill_init(T init) {
+        R result;
+        std::fill(std::begin(result), std::end(result), init);
+        return result;
+    }
+}
+
+#define XTENSOR_REDUCER_FUNCTION(NAME, FUNCTOR, RESULT_TYPE, INIT)                                                \
+    template <class T = void, class E, class X, class EVS = DEFAULT_STRATEGY_REDUCERS,                            \
+              XTL_REQUIRES(xtl::negation<is_reducer_options<X>>, xtl::negation<std::is_integral<X>>)>             \
+    inline auto NAME(E&& e, X&& axes, EVS es = EVS())                                                             \
     {                                                                                                             \
-        using result_type = RESULT_TYPE;                                                                          \
+        using result_type = std::conditional_t<std::is_same<T, void>::value, RESULT_TYPE, T>;                     \
         using functor_type = FUNCTOR<result_type>;                                                                \
-        return reduce(make_xreducer_functor(functor_type()), std::forward<E>(e),                                  \
-                      std::forward<X>(axes), es);                                                                 \
+        using init_value_fct = xt::const_value<result_type/*, INIT*/>;                                            \
+        return xt::reduce(make_xreducer_functor(functor_type(),                                                   \
+                          init_value_fct(detail::fill_init<result_type>(INIT))),                                  \
+                          std::forward<E>(e),                                                                     \
+                          std::forward<X>(axes), es);                                                             \
     }                                                                                                             \
                                                                                                                   \
-    template <class E, class ES = DEFAULT_STRATEGY_REDUCERS,                                                      \
-              class = std::enable_if_t<std::is_base_of<evaluation_strategy::base, ES>::value, int>>               \
-    inline auto NAME(E&& e, ES es = ES()) noexcept                                                                \
+    template <class T = void, class E, class X, class EVS = DEFAULT_STRATEGY_REDUCERS,                            \
+              XTL_REQUIRES(xtl::negation<is_reducer_options<X>>, std::is_integral<X>)>                            \
+    inline auto NAME(E&& e, X axis, EVS es = EVS())                                                               \
     {                                                                                                             \
-        using result_type = RESULT_TYPE;                                                                          \
-        using functor_type = FUNCTOR<result_type>;                                                                \
-        return reduce(make_xreducer_functor(functor_type()), std::forward<E>(e), es);                             \
+        return NAME(std::forward<E>(e), {axis}, es);                                                              \
     }                                                                                                             \
-
-#define OLD_CLANG_REDUCER(NAME, FUNCTOR, RESULT_TYPE)                                                             \
-    template <class E, class I, class ES = DEFAULT_STRATEGY_REDUCERS>                                             \
-        inline auto NAME(E&& e, std::initializer_list<I> axes, ES es = ES()) noexcept                             \
-        {                                                                                                         \
-            using result_type = RESULT_TYPE;                                                                      \
-            using functor_type = FUNCTOR<result_type>;                                                            \
-            return reduce(make_xreducer_functor(functor_type()), std::forward<E>(e), axes);                       \
-        }                                                                                                         \
-
-#define MODERN_CLANG_REDUCER(NAME, FUNCTOR, RESULT_TYPE)                                                          \
-    template <class E, class I, std::size_t N, class ES = DEFAULT_STRATEGY_REDUCERS>                              \
-    inline auto NAME(E&& e, const I (&axes)[N], ES es = ES()) noexcept                                            \
+                                                                                                                  \
+    template <class T = void, class E, class EVS = DEFAULT_STRATEGY_REDUCERS,                                     \
+              XTL_REQUIRES(is_reducer_options<EVS>)>                                                              \
+    inline auto NAME(E&& e, EVS es = EVS())                                                                       \
     {                                                                                                             \
-        using result_type = RESULT_TYPE;                                                                          \
+        using result_type = std::conditional_t<std::is_same<T, void>::value, RESULT_TYPE, T>;                     \
         using functor_type = FUNCTOR<result_type>;                                                                \
-        return reduce(make_xreducer_functor(functor_type()), std::forward<E>(e), axes, es);                       \
-    }                                                                                                             \
+        using init_value_fct = xt::const_value<result_type/*, INIT*/>;                                            \
+        return xt::reduce(make_xreducer_functor(functor_type(),                                                   \
+                          init_value_fct(detail::fill_init<result_type>(INIT))), std::forward<E>(e), es);         \
+    }
 
+#define XTENSOR_OLD_CLANG_REDUCER(NAME, FUNCTOR, RESULT_TYPE, INIT)                                               \
+    template <class T = void, class E, class I, class EVS = DEFAULT_STRATEGY_REDUCERS>                            \
+    inline auto NAME(E&& e, std::initializer_list<I> axes, EVS es = EVS())                                        \
+    {                                                                                                             \
+        using result_type = std::conditional_t<std::is_same<T, void>::value, RESULT_TYPE, T>;                     \
+        using functor_type = FUNCTOR<result_type>;                                                                \
+        using init_value_fct = xt::const_value<result_type/*, INIT*/>;                                            \
+        return xt::reduce(make_xreducer_functor(functor_type(),                                                   \
+                          init_value_fct(detail::fill_init<result_type>(INIT))), std::forward<E>(e), axes, es);   \
+    }
+
+#define XTENSOR_MODERN_CLANG_REDUCER(NAME, FUNCTOR, RESULT_TYPE, INIT)                                            \
+    template <class T = void, class E, class I, std::size_t N, class EVS = DEFAULT_STRATEGY_REDUCERS>             \
+    inline auto NAME(E&& e, const I (&axes)[N], EVS es = EVS())                                                   \
+    {                                                                                                             \
+        using result_type = std::conditional_t<std::is_same<T, void>::value, RESULT_TYPE, T>;                     \
+        using functor_type = FUNCTOR<result_type>;                                                                \
+        using init_value_fct = xt::const_value<result_type/*, INIT*/>;                                            \
+        return xt::reduce(make_xreducer_functor(functor_type(),                                                   \
+                          init_value_fct(detail::fill_init<result_type>(INIT))), std::forward<E>(e), axes, es);   \
+    }
 
     /*******************
      * basic functions *
@@ -563,61 +570,168 @@ INT_SPECIALIZATION_IMPL(FUNC_NAME, RETURN_VAL, unsigned long long);             
 
     namespace math
     {
-        template <class T>
+        template <class T = void>
         struct minimum
         {
-            using result_type = T;
-            using simd_value_type = xsimd::simd_type<T>;
-
-            constexpr result_type operator()(const T& t1, const T& t2) const noexcept
+            template <class A1, class A2>
+            constexpr auto operator()(const A1& t1, const A2& t2) const noexcept
             {
-                return (t1 < t2) ? t1 : t2;
+                return xtl::select(t1 < t2, t1, t2);
             }
 
-            constexpr simd_value_type simd_apply(const simd_value_type& t1, const simd_value_type& t2) const noexcept
+            template <class A1, class A2>
+            constexpr auto simd_apply(const A1& t1, const A2& t2) const noexcept
             {
-                return xsimd::select(t1 < t2, t1, t2);
+                return xt_simd::select(t1 < t2, t1, t2);
             }
         };
 
-        template <class T>
+        template <class T = void>
         struct maximum
         {
-            using result_type = T;
-            using simd_value_type = xsimd::simd_type<T>;
-
-            constexpr result_type operator()(const T& t1, const T& t2) const noexcept
+            template <class A1, class A2>
+            constexpr auto operator()(const A1& t1, const A2& t2) const noexcept
             {
-                return (t1 > t2) ? t1 : t2;
+                return xtl::select(t1 > t2, t1, t2);
             }
 
-            constexpr simd_value_type simd_apply(const simd_value_type& t1, const simd_value_type& t2) const noexcept
+            template <class A1, class A2>
+            constexpr auto simd_apply(const A1& t1, const A2& t2) const noexcept
             {
-                return xsimd::select(t1 > t2, t1, t2);
+                return xt_simd::select(t1 > t2, t1, t2);
             }
         };
 
-        template <class T>
         struct clamp_fun
         {
-            using first_argument_type = T;
-            using second_argument_type = T;
-            using third_argument_type = T;
-            using result_type = T;
-            using simd_value_type = xsimd::simd_type<T>;
-
-            constexpr T operator()(const T& v, const T& lo, const T& hi) const
+            template <class A1, class A2, class A3>
+            constexpr auto operator()(const A1& v, const A2& lo, const A3& hi) const
             {
-                return v < lo ? lo : hi < v ? hi : v;
+                return xtl::select(v < lo, lo, xtl::select(hi < v, hi, v));
             }
 
-            constexpr simd_value_type simd_apply(const simd_value_type& v,
-                                                 const simd_value_type& lo,
-                                                 const simd_value_type& hi) const
+            template <class A1, class A2, class A3>
+            constexpr auto simd_apply(const A1& v,
+                                      const A2& lo,
+                                      const A3& hi) const
             {
-                return xsimd::select(v < lo, lo, xsimd::select(hi < v, hi, v));
+                return xt_simd::select(v < lo, lo, xt_simd::select(hi < v, hi, v));
             }
         };
+
+        struct deg2rad
+        {
+            template <class A, std::enable_if_t<std::is_integral<A>::value, int> = 0>
+            constexpr double operator()(const A& a) const noexcept
+            {
+              return a * xt::numeric_constants<double>::PI / 180.0;
+            }
+
+            template <class A, std::enable_if_t<std::is_floating_point<A>::value, int> = 0>
+            constexpr auto operator()(const A& a) const noexcept
+            {
+              return a * xt::numeric_constants<A>::PI / A(180.0);
+            }
+
+            template <class A, std::enable_if_t<std::is_integral<A>::value, int> = 0>
+            constexpr double simd_apply(const A& a) const noexcept
+            {
+              return a * xt::numeric_constants<double>::PI / 180.0;
+            }
+
+            template <class A, std::enable_if_t<std::is_floating_point<A>::value, int> = 0>
+            constexpr auto simd_apply(const A& a) const noexcept
+            {
+              return a * xt::numeric_constants<A>::PI / A(180.0);
+            }
+        };
+
+        struct rad2deg
+        {
+            template <class A, std::enable_if_t<std::is_integral<A>::value, int> = 0>
+            constexpr double operator()(const A& a) const noexcept
+            {
+              return a * 180.0 / xt::numeric_constants<double>::PI;
+            }
+
+            template <class A, std::enable_if_t<std::is_floating_point<A>::value, int> = 0>
+            constexpr auto operator()(const A& a) const noexcept
+            {
+              return a * A(180.0) / xt::numeric_constants<A>::PI;
+            }
+
+            template <class A, std::enable_if_t<std::is_integral<A>::value, int> = 0>
+            constexpr double simd_apply(const A& a) const noexcept
+            {
+              return a * 180.0 / xt::numeric_constants<double>::PI;
+            }
+
+            template <class A, std::enable_if_t<std::is_floating_point<A>::value, int> = 0>
+            constexpr auto simd_apply(const A& a) const noexcept
+            {
+              return a * A(180.0) / xt::numeric_constants<A>::PI;
+            }
+        };
+    }
+
+    /**
+     * @ingroup basic_functions
+     * @brief Convert angles from degrees to radians.
+     *
+     * Returns an \ref xfunction for the element-wise corresponding
+     * angle in radians of \em e.
+     * @param e an \ref xexpression
+     * @return an \ref xfunction
+     */
+    template <class E>
+    inline auto deg2rad(E&& e) noexcept
+        -> detail::xfunction_type_t<math::deg2rad, E> {
+        return detail::make_xfunction<math::deg2rad>(std::forward<E>(e));
+    }
+
+    /**
+     * @ingroup basic_functions
+     * @brief Convert angles from degrees to radians.
+     *
+     * Returns an \ref xfunction for the element-wise corresponding
+     * angle in radians of \em e.
+     * @param e an \ref xexpression
+     * @return an \ref xfunction
+     */
+    template <class E>
+    inline auto radians(E&& e) noexcept
+        -> detail::xfunction_type_t<math::deg2rad, E> {
+        return detail::make_xfunction<math::deg2rad>(std::forward<E>(e));
+    }
+
+    /**
+     * @ingroup basic_functions
+     * @brief Convert angles from radians to degrees.
+     *
+     * Returns an \ref xfunction for the element-wise corresponding
+     * angle in degrees of \em e.
+     * @param e an \ref xexpression
+     * @return an \ref xfunction
+     */
+    template <class E>
+    inline auto rad2deg(E&& e) noexcept
+        -> detail::xfunction_type_t<math::rad2deg, E> {
+        return detail::make_xfunction<math::rad2deg>(std::forward<E>(e));
+    }
+
+    /**
+     * @ingroup basic_functions
+     * @brief Convert angles from radians to degrees.
+     *
+     * Returns an \ref xfunction for the element-wise corresponding
+     * angle in degrees of \em e.
+     * @param e an \ref xexpression
+     * @return an \ref xfunction
+     */
+    template <class E>
+    inline auto degrees(E&& e) noexcept
+        -> detail::xfunction_type_t<math::rad2deg, E> {
+        return detail::make_xfunction<math::rad2deg>(std::forward<E>(e));
     }
 
     /**
@@ -632,9 +746,9 @@ INT_SPECIALIZATION_IMPL(FUNC_NAME, RETURN_VAL, unsigned long long);             
      */
     template <class E1, class E2>
     inline auto maximum(E1&& e1, E2&& e2) noexcept
-        -> detail::xfunction_type_t<math::maximum, E1, E2>
+        -> detail::xfunction_type_t<math::maximum<void>, E1, E2>
     {
-        return detail::make_xfunction<math::maximum>(std::forward<E1>(e1), std::forward<E2>(e2));
+        return detail::make_xfunction<math::maximum<void>>(std::forward<E1>(e1), std::forward<E2>(e2));
     }
 
     /**
@@ -649,9 +763,9 @@ INT_SPECIALIZATION_IMPL(FUNC_NAME, RETURN_VAL, unsigned long long);             
      */
     template <class E1, class E2>
     inline auto minimum(E1&& e1, E2&& e2) noexcept
-        -> detail::xfunction_type_t<math::minimum, E1, E2>
+        -> detail::xfunction_type_t<math::minimum<void>, E1, E2>
     {
-        return detail::make_xfunction<math::minimum>(std::forward<E1>(e1), std::forward<E2>(e2));
+        return detail::make_xfunction<math::minimum<void>>(std::forward<E1>(e1), std::forward<E2>(e2));
     }
 
     /**
@@ -665,11 +779,14 @@ INT_SPECIALIZATION_IMPL(FUNC_NAME, RETURN_VAL, unsigned long long);             
      * @param es evaluation strategy of the reducer
      * @return an \ref xreducer
      */
-    REDUCER_FUNCTION(amax, math::maximum, typename std::decay_t<E>::value_type);
+    XTENSOR_REDUCER_FUNCTION(amax, math::maximum, typename std::decay_t<E>::value_type,
+                             std::numeric_limits<xvalue_type_t<std::decay_t<E>>>::lowest())
 #ifdef X_OLD_CLANG
-    OLD_CLANG_REDUCER(amax, math::maximum, typename std::decay_t<E>::value_type);
+    XTENSOR_OLD_CLANG_REDUCER(amax, math::maximum, typename std::decay_t<E>::value_type,
+                              std::numeric_limits<xvalue_type_t<std::decay_t<E>>>::lowest())
 #else
-    MODERN_CLANG_REDUCER(amax, math::maximum, typename std::decay_t<E>::value_type);
+    XTENSOR_MODERN_CLANG_REDUCER(amax, math::maximum, typename std::decay_t<E>::value_type,
+                                 std::numeric_limits<xvalue_type_t<std::decay_t<E>>>::lowest())
 #endif
 
     /**
@@ -683,11 +800,14 @@ INT_SPECIALIZATION_IMPL(FUNC_NAME, RETURN_VAL, unsigned long long);             
      * @param es evaluation strategy of the reducer
      * @return an \ref xreducer
      */
-    REDUCER_FUNCTION(amin, math::minimum, typename std::decay_t<E>::value_type);
+    XTENSOR_REDUCER_FUNCTION(amin, math::minimum, typename std::decay_t<E>::value_type,
+                             std::numeric_limits<xvalue_type_t<std::decay_t<E>>>::max())
 #ifdef X_OLD_CLANG
-    OLD_CLANG_REDUCER(amin, math::minimum, typename std::decay_t<E>::value_type);
+    XTENSOR_OLD_CLANG_REDUCER(amin, math::minimum, typename std::decay_t<E>::value_type,
+                              std::numeric_limits<xvalue_type_t<std::decay_t<E>>>::max())
 #else
-    MODERN_CLANG_REDUCER(amin, math::minimum, typename std::decay_t<E>::value_type);
+    XTENSOR_MODERN_CLANG_REDUCER(amin, math::minimum, typename std::decay_t<E>::value_type,
+                                 std::numeric_limits<xvalue_type_t<std::decay_t<E>>>::max())
 #endif
 
     /**
@@ -711,40 +831,34 @@ INT_SPECIALIZATION_IMPL(FUNC_NAME, RETURN_VAL, unsigned long long);             
 
     namespace math
     {
-        namespace detail
+        template <class T>
+        struct sign_impl
         {
-            template <typename T>
-            constexpr std::enable_if_t<std::is_signed<T>::value, T>
-            sign_impl(T x)
+            template <class XT = T>
+            static constexpr std::enable_if_t<std::is_signed<XT>::value, T> run(T x)
             {
-                return std::isnan(x) ? std::numeric_limits<T>::quiet_NaN() : x == 0 ? (T)copysign(T(0), x) : (T)copysign(T(1), x);
+                return std::isnan(x) ? std::numeric_limits<T>::quiet_NaN() : x == 0 ? T(copysign(T(0), x)) : T(copysign(T(1), x));
             }
 
-            template <typename T>
-            inline std::enable_if_t<xtl::is_complex<T>::value, T>
-            sign_impl(T x)
+            template <class XT = T>
+            static constexpr std::enable_if_t<xtl::is_complex<XT>::value, T> run(T x)
             {
-                typename T::value_type e = (x.real() != T(0)) ? x.real() : x.imag();
-                return T(sign_impl(e), 0);
+                return T(sign_impl<typename T::value_type>::run((x.real() != typename T::value_type(0)) ? x.real() : x.imag()), 0);
             }
 
-            template <typename T>
-            constexpr std::enable_if_t<std::is_unsigned<T>::value, T>
-            sign_impl(T x)
+            template <class XT = T>
+            static constexpr std::enable_if_t<std::is_unsigned<XT>::value, T> run(T x)
             {
                 return T(x > T(0));
             }
-        }
+        };
 
-        template <class T>
         struct sign_fun
         {
-            using argument_type = T;
-            using result_type = T;
-
-            constexpr T operator()(const T& x) const
+            template <class T>
+            constexpr auto operator()(const T& x) const
             {
-                return detail::sign_impl(x);
+                return sign_impl<T>::run(x);
             }
         };
     }
@@ -910,6 +1024,218 @@ INT_SPECIALIZATION_IMPL(FUNC_NAME, RETURN_VAL, unsigned long long);             
         -> detail::xfunction_type_t<math::pow_fun, E1, E2>
     {
         return detail::make_xfunction<math::pow_fun>(std::forward<E1>(e1), std::forward<E2>(e2));
+    }
+
+    namespace detail
+    {
+        template <class F, class... T, typename = decltype(std::declval<F>()(std::declval<T>()...))>
+        std::true_type  supports_test(const F&, const T&...);
+        std::false_type supports_test(...);
+
+        template <class... T> struct supports;
+
+        template <class F, class... T> struct supports<F(T...)>
+            : decltype(supports_test(std::declval<F>(), std::declval<T>()...))
+        {
+        };
+
+        template <class F>
+        struct lambda_adapt
+        {
+            explicit lambda_adapt(F&& lmbd)
+                : m_lambda(std::move(lmbd))
+            {
+            }
+
+            template <class... T>
+            auto operator()(T... args) const
+            {
+                return m_lambda(args...);
+            }
+
+            template <class... T, XTL_REQUIRES(detail::supports<F(T...)>)>
+            auto simd_apply(T... args) const
+            {
+                return m_lambda(args...);
+            }
+
+            F m_lambda;
+        };
+    }
+
+    /**
+     * Create a xfunction from a lambda
+     *
+     * This function can be used to easily create performant xfunctions from lambdas:
+     *
+     * \code{cpp}
+     * template <class E1>
+     * inline auto square(E1&& e1) noexcept
+     * {
+     *     auto fnct = [](auto x) -> decltype(x * x) {
+     *         return x * x;
+     *     };
+     *     return make_lambda_xfunction(std::move(fnct), std::forward<E1>(e1));
+     * }
+     * \endcode
+     *
+     * Lambda function allow the reusal of a single arguments in multiple places (otherwise
+     * only correctly possible when using xshared_expressions). ``auto`` lambda functions are
+     * automatically vectorized with ``xsimd`` if possible (note that the trailing
+     * ``-> decltype(...)`` is mandatory for the feature detection to work).
+     *
+     * @param lambda the lambda to be vectorized
+     * @param args forwarded arguments
+     *
+     * @return lazy xfunction
+     */
+    template <class F, class... E>
+    inline auto make_lambda_xfunction(F&& lambda, E&&... args)
+    {
+        using xfunction_type = typename detail::xfunction_type<detail::lambda_adapt<F>, E...>::type;
+        return xfunction_type(detail::lambda_adapt<F>(std::forward<F>(lambda)), std::forward<E>(args)...);
+    }
+
+
+#define XTENSOR_GCC_VERSION (__GNUC__ * 10000 + __GNUC_MINOR__ * 100 + __GNUC_PATCHLEVEL__)
+
+// Workaround for MSVC 2015 & GCC 4.9
+#if (defined(_MSC_VER) && _MSC_VER < 1910) || (defined(__GNUC__) && GCC_VERSION < 49999)
+    #define XTENSOR_DISABLE_LAMBDA_FCT
+#endif
+
+#ifdef XTENSOR_DISABLE_LAMBDA_FCT
+    struct square_fct
+    {
+        template <class T>
+        auto operator()(T x) const
+            -> decltype(x * x)
+        {
+            return x * x;
+        }
+    };
+
+    struct cube_fct
+    {
+        template <class T>
+        auto operator()(T x) const
+            -> decltype(x * x * x)
+        {
+            return x * x * x;
+        }
+    };
+#endif
+
+    /**
+     * @ingroup pow_functions
+     * @brief Square power function, equivalent to e1 * e1.
+     *
+     * Returns an \ref xfunction for the element-wise value of
+     * of \em e1 * \em e1.
+     * @param e1 an \ref xexpression or a scalar
+     * @return an \ref xfunction
+     */
+    template <class E1>
+    inline auto square(E1&& e1) noexcept
+    {
+#ifdef XTENSOR_DISABLE_LAMBDA_FCT
+        return make_lambda_xfunction(square_fct{}, std::forward<E1>(e1));
+#else
+        auto fnct = [](auto x) -> decltype(x * x) {
+            return x * x;
+        };
+        return make_lambda_xfunction(std::move(fnct), std::forward<E1>(e1));
+#endif
+    }
+
+    /**
+     * @ingroup pow_functions
+     * @brief Cube power function, equivalent to e1 * e1 * e1.
+     *
+     * Returns an \ref xfunction for the element-wise value of
+     * of \em e1 * \em e1.
+     * @param e1 an \ref xexpression or a scalar
+     * @return an \ref xfunction
+     */
+    template <class E1>
+    inline auto cube(E1&& e1) noexcept
+    {
+#ifdef XTENSOR_DISABLE_LAMBDA_FCT
+        return make_lambda_xfunction(cube_fct{}, std::forward<E1>(e1));
+#else
+        auto fnct = [](auto x) -> decltype(x * x * x) {
+            return x * x * x;
+        };
+        return make_lambda_xfunction(std::move(fnct), std::forward<E1>(e1));
+#endif
+    }
+
+#undef XTENSOR_GCC_VERSION
+#undef XTENSOR_DISABLE_LAMBDA_FCT
+
+    namespace detail
+    {
+        // Thanks to Matt Pharr in http://pbrt.org/hair.pdf
+        template <std::size_t N>
+        struct pow_impl;
+
+        template <std::size_t N>
+        struct pow_impl
+        {
+            template <class T>
+            auto operator()(T v) const
+                -> decltype(v * v)
+            {
+                T temp = pow_impl<N / 2>{}(v);
+                return temp * temp * pow_impl<N & 1>{}(v);
+            }
+        };
+
+        template <>
+        struct pow_impl<1>
+        {
+            template <class T>
+            auto operator()(T v) const
+                -> T
+            {
+                return v;
+            }
+        };
+
+        template <>
+        struct pow_impl<0>
+        {
+            template <class T>
+            auto operator()(T /*v*/) const
+                -> T
+            {
+                return T(1);
+            }
+        };
+    }
+
+    /**
+     * @ingroup pow_functions
+     * @brief Integer power function.
+     *
+     * Returns an \ref xfunction for the element-wise power of e1 to
+     * an integral constant.
+     *
+     * Instead of computing the power by using the (expensive) logarithm, this function
+     * computes the power in a number of straight-forward multiplication steps. This function
+     * is therefore much faster (even for high N) than the generic pow-function.
+     *
+     * For example, `e1^20` can be expressed as `(((e1^2)^2)^2)^2*(e1^2)^2`, which is just 5 multiplications.
+     *
+     * @param e an \ref xexpression
+     * @tparam N the exponent (has to be positive integer)
+     * @return an \ref xfunction
+     */
+    template <std::size_t N, class E>
+    inline auto pow(E&& e) noexcept
+    {
+        static_assert(N > 0, "integer power cannot be negative");
+        return make_lambda_xfunction(detail::pow_impl<N>{}, std::forward<E>(e));
     }
 
     /**
@@ -1433,10 +1759,10 @@ INT_SPECIALIZATION_IMPL(FUNC_NAME, RETURN_VAL, unsigned long long);             
             return FUNCTOR(std::get<Is>(args)...);
         }
 
-        template <template <class...> class F, class... A, class... E>
+        template <class F, class... A, class... E>
         inline auto make_xfunction(std::tuple<A...>&& f_args, E&&... e) noexcept
         {
-            using functor_type = F<common_value_type_t<std::decay_t<E>...>>;
+            using functor_type = F;
             using expression_tag = xexpression_tag_t<E...>;
             using type = select_xfunction_expression_t<expression_tag,
                                                        functor_type,
@@ -1448,7 +1774,6 @@ INT_SPECIALIZATION_IMPL(FUNC_NAME, RETURN_VAL, unsigned long long);             
             return type(std::move(functor), std::forward<E>(e)...);
         }
 
-        template <class T>
         struct isclose
         {
             using result_type = bool;
@@ -1457,29 +1782,25 @@ INT_SPECIALIZATION_IMPL(FUNC_NAME, RETURN_VAL, unsigned long long);             
             {
             }
 
-            bool operator()(const T& a, const T& b) const
+            template <class A1, class A2>
+            bool operator()(const A1& a, const A2& b) const
             {
-                using internal_type = promote_type_t<T, double>;
-                if(math::isnan(a) && math::isnan(b))
+                using internal_type = xtl::promote_type_t<A1, A2, double>;
+                if (math::isnan(a) && math::isnan(b))
                 {
                     return m_equal_nan;
                 }
-                if(math::isinf(a) && math::isinf(b))
+                if (math::isinf(a) && math::isinf(b))
                 {
                     // check for both infinity signs equal
                     return a == b;
                 }
-                auto d = math::abs((internal_type) a - (internal_type) b);
-                return d <= m_atol || d <= m_rtol * (double) std::max(math::abs(a), math::abs(b));
+                auto d = math::abs(internal_type(a) - internal_type(b));
+                return d <= m_atol || d <= m_rtol * double((std::max)(math::abs(internal_type(a)), math::abs(internal_type(b))));
             }
 
-            template <class U>
-            struct rebind
-            {
-                using type = isclose<U>;
-            };
-
         private:
+
             double m_rtol;
             double m_atol;
             bool m_equal_nan;
@@ -1531,7 +1852,6 @@ INT_SPECIALIZATION_IMPL(FUNC_NAME, RETURN_VAL, unsigned long long);             
      * Reducing functions *
      **********************/
 
-
     /**
      * @defgroup  red_functions reducing functions
      */
@@ -1547,11 +1867,11 @@ INT_SPECIALIZATION_IMPL(FUNC_NAME, RETURN_VAL, unsigned long long);             
      * @param es evaluation strategy of the reducer
      * @return an \ref xreducer
      */
-    REDUCER_FUNCTION(sum, std::plus, big_promote_type_t<typename std::decay_t<E>::value_type>);
+    XTENSOR_REDUCER_FUNCTION(sum, std::plus, xtl::big_promote_type_t<typename std::decay_t<E>::value_type>, 0)
 #ifdef X_OLD_CLANG
-    OLD_CLANG_REDUCER(sum, std::plus, big_promote_type_t<typename std::decay_t<E>::value_type>);
+    XTENSOR_OLD_CLANG_REDUCER(sum, std::plus, xtl::big_promote_type_t<typename std::decay_t<E>::value_type>, 0)
 #else
-    MODERN_CLANG_REDUCER(sum, std::plus, big_promote_type_t<typename std::decay_t<E>::value_type>);
+    XTENSOR_MODERN_CLANG_REDUCER(sum, std::plus, xtl::big_promote_type_t<typename std::decay_t<E>::value_type>, 0)
 #endif
 
     /**
@@ -1565,12 +1885,62 @@ INT_SPECIALIZATION_IMPL(FUNC_NAME, RETURN_VAL, unsigned long long);             
      * @param es evaluation strategy of the reducer
      * @return an \ref xreducer
      */
-    REDUCER_FUNCTION(prod, std::multiplies, big_promote_type_t<typename std::decay_t<E>::value_type>);
+    XTENSOR_REDUCER_FUNCTION(prod, std::multiplies, xtl::big_promote_type_t<typename std::decay_t<E>::value_type>, 1)
 #ifdef X_OLD_CLANG
-    OLD_CLANG_REDUCER(prod, std::multiplies, big_promote_type_t<typename std::decay_t<E>::value_type>);
+    XTENSOR_OLD_CLANG_REDUCER(prod, std::multiplies, xtl::big_promote_type_t<typename std::decay_t<E>::value_type>, 1)
 #else
-    MODERN_CLANG_REDUCER(prod, std::multiplies, big_promote_type_t<typename std::decay_t<E>::value_type>);
+    XTENSOR_MODERN_CLANG_REDUCER(prod, std::multiplies, xtl::big_promote_type_t<typename std::decay_t<E>::value_type>, 1)
 #endif
+
+    namespace detail
+    {
+        template <class T, class S, class ST>
+        inline auto mean_division(S&& s, ST e_size)
+        {
+            using value_type = typename std::conditional_t<std::is_same<T, void>::value, double, T>;
+            // Avoids floating point exception when s.size is 0
+            value_type div = s.size() != ST(0) ? static_cast<value_type>(e_size / s.size()) : value_type(0);
+            return std::move(s) / std::move(div);
+        }
+
+        template <class T, class E, class X, class D, class EVS,
+                  XTL_REQUIRES(xtl::negation<is_reducer_options<X>>, std::is_integral<D>)>
+        inline auto mean(E&& e, X&& axes, D const& ddof, EVS es)
+        {
+            // sum cannot always be a double. It could be a complex number which cannot operate on
+            // std::plus<double>.
+            const auto size = e.size();
+            auto s = sum<T>(std::forward<E>(e), std::forward<X>(axes), es);
+            return mean_division<T>(std::move(s), size - ddof);
+        }
+
+#ifdef X_OLD_CLANG
+        template <class T, class E, class I, class D, class EVS>
+        inline auto mean(E&& e, std::initializer_list<I> axes, const D& ddof, EVS es)
+        {
+            const auto size = e.size();
+            auto s = sum<T>(std::forward<E>(e), axes, es);
+            return detail::mean_division<T>(std::move(s), size - ddof);
+        }
+#else
+        template <class T, class E, class I, std::size_t N, class D, class EVS>
+        inline auto mean(E&& e, const I (&axes)[N], const D& ddof, EVS es)
+        {
+            const auto size = e.size();
+            auto s = sum<T>(std::forward<E>(e), axes, es);
+            return detail::mean_division<T>(std::move(s), size - ddof);
+        }
+#endif
+
+        template <class T, class E, class D, class EVS,
+                  XTL_REQUIRES(is_reducer_options<EVS>, std::is_integral<D>)>
+        inline auto mean_noaxis(E&& e, const D& ddof, EVS es)
+        {
+            using value_type = typename std::conditional_t<std::is_same<T, void>::value, double, T>;
+            const auto size = e.size();
+            return sum<T>(std::forward<E>(e), es) / static_cast<value_type>(size - ddof);
+        }
+    }
 
     /**
      * @ingroup red_functions
@@ -1580,40 +1950,322 @@ INT_SPECIALIZATION_IMPL(FUNC_NAME, RETURN_VAL, unsigned long long);             
      * \em axes.
      * @param e an \ref xexpression
      * @param axes the axes along which the mean is computed (optional)
+     * @param es the evaluation strategy (optional)
      * @return an \ref xexpression
      */
-    template <class E, class X>
-    inline auto mean(E&& e, X&& axes) noexcept
+    template <class T = void, class E, class X, class EVS = DEFAULT_STRATEGY_REDUCERS,
+              XTL_REQUIRES(xtl::negation<is_reducer_options<X>>)>
+    inline auto mean(E&& e, X&& axes, EVS es = EVS())
     {
-        auto size = e.size();
-        auto s = sum(std::forward<E>(e), std::forward<X>(axes));
-        return std::move(s) / static_cast<double>(size / s.size());
+        return detail::mean<T>(std::forward<E>(e), std::forward<X>(axes), 0u, es);
     }
 
-    template <class E>
-    inline auto mean(E&& e) noexcept
+    template <class T = void, class E, class EVS = DEFAULT_STRATEGY_REDUCERS,
+              XTL_REQUIRES(is_reducer_options<EVS>)>
+    inline auto mean(E&& e, EVS es = EVS())
     {
-        auto size = e.size();
-        return sum(std::forward<E>(e)) / static_cast<double>(size);
+        return detail::mean_noaxis<T>(std::forward<E>(e), 0u, es);
     }
 
 #ifdef X_OLD_CLANG
-    template <class E, class I>
-    inline auto mean(E&& e, std::initializer_list<I> axes) noexcept
+    template <class T = void, class E, class I, class EVS = DEFAULT_STRATEGY_REDUCERS>
+    inline auto mean(E&& e, std::initializer_list<I> axes, EVS es = EVS())
     {
-        auto size = e.size();
-        auto s = sum(std::forward<E>(e), axes);
-        return std::move(s) / static_cast<double>(size / s.size());
+        return detail::mean<T>(std::move(s), e.size());
     }
 #else
-    template <class E, class I, std::size_t N>
-    inline auto mean(E&& e, const I (&axes)[N]) noexcept
+    template <class T = void, class E, class I, std::size_t N, class EVS = DEFAULT_STRATEGY_REDUCERS>
+    inline auto mean(E&& e, const I (&axes)[N], EVS es = EVS())
     {
-        auto size = e.size();
-        auto s = sum(std::forward<E>(e), axes);
-        return std::move(s) / static_cast<double>(size / s.size());
+        return detail::mean<T>(std::forward<E>(e), axes, 0u, es);
     }
 #endif
+
+    /**
+     * @ingroup red_functions
+     * @brief Average of elements over given axes using weights.
+     *
+     * Returns an \ref xreducer for the mean of elements over given
+     * \em axes.
+     * @param e an \ref xexpression
+     * @param weights \ref xexpression containing weights associated with the values in \ref e
+     * @param axes the axes along which the mean is computed (optional)
+     * @return an \ref xexpression
+     *
+     * @sa mean
+     */
+    template <class E, class W, class X, class EVS = DEFAULT_STRATEGY_REDUCERS,
+              XTL_REQUIRES(is_reducer_options<EVS>, xtl::negation<std::is_integral<X>>)>
+    inline auto average(E&& e, W&& weights, X&& axes, EVS ev = EVS())
+    {
+        xindex_type_t<typename std::decay_t<E>::shape_type> broadcast_shape;
+        xt::resize_container(broadcast_shape, e.dimension());
+        auto ax = normalize_axis(e, axes);
+        if (weights.dimension() == 1)
+        {
+            if (weights.size() != e.shape()[ax[0]])
+            {
+                XTENSOR_THROW(std::runtime_error, "Weights need to have the same shape as expression at axes.");
+            }
+
+            std::fill(broadcast_shape.begin(), broadcast_shape.end(), std::size_t(1));
+            broadcast_shape[ax[0]] = weights.size();
+        }
+        else
+        {
+            if (!same_shape(e.shape(), weights.shape()))
+            {
+                XTENSOR_THROW(std::runtime_error, "Weights with dim > 1 need to have the same shape as expression.");
+            }
+
+            std::copy(e.shape().begin(), e.shape().end(), broadcast_shape.begin());
+        }
+
+        constexpr layout_type L = default_assignable_layout(std::decay_t<W>::static_layout);
+        auto weights_view = reshape_view<L>(std::forward<W>(weights), std::move(broadcast_shape));
+        auto scl = sum(weights_view, ax, xt::evaluation_strategy::immediate);
+        return sum(std::forward<E>(e) * std::move(weights_view), std::move(ax), ev) / std::move(scl);
+    }
+
+#ifndef X_OLD_CLANG
+    template <class E, class W, class X, std::size_t N, class EVS = DEFAULT_STRATEGY_REDUCERS>
+    inline auto average(E&& e, W&& weights, const X(&axes)[N], EVS ev = EVS())
+    {
+        // need to select the X&& overload and forward to different type
+        using ax_t = std::array<std::size_t, N>;
+        return average(std::forward<E>(e), std::forward<W>(weights), xt::forward_normalize<ax_t>(e, axes), ev);
+    }
+#else
+    template <class E, class W, class I, class EVS = DEFAULT_STRATEGY_REDUCERS>
+    inline auto average(E&& e, W&& weights, std::initializer_list<I> axes, EVS ev = EVS())
+    {
+        using ax_t = dynamic_shape<std::size_t>;
+        return average(std::forward<E>(e), std::forward<W>(weights), xt::forward_normalize<ax_t>(e, axes), ev);
+    }
+#endif
+
+    template <class E, class W, class EVS = DEFAULT_STRATEGY_REDUCERS,
+              XTL_REQUIRES(is_reducer_options<EVS>)>
+    inline auto average(E&& e, W&& weights, EVS ev = EVS())
+    {
+        if (weights.dimension() != e.dimension() || !std::equal(weights.shape().begin(), weights.shape().end(), e.shape().begin()))
+        {
+            XTENSOR_THROW(std::runtime_error, "Weights need to have the same shape as expression.");
+        }
+
+        auto div = sum(weights, evaluation_strategy::immediate)();
+        auto s = sum(std::forward<E>(e) * std::forward<W>(weights), ev) / std::move(div);
+        return s;
+    }
+
+    template <class E, class EVS = DEFAULT_STRATEGY_REDUCERS, XTL_REQUIRES(is_reducer_options<EVS>)>
+    inline auto average(E&& e, EVS ev = EVS())
+    {
+        return mean(e, ev);
+    }
+
+    namespace detail
+    {
+        template<typename E>
+        std::enable_if_t<std::is_lvalue_reference<E>::value, E>
+        shared_forward(E e) noexcept
+        {
+            return e;
+        }
+
+        template<typename E>
+        std::enable_if_t<!std::is_lvalue_reference<E>::value, xshared_expression<E>>
+        shared_forward(E e) noexcept
+        {
+            return make_xshared(std::move(e));
+        }
+    }
+
+    template <class T = void, class E, class D, class EVS = DEFAULT_STRATEGY_REDUCERS,
+              XTL_REQUIRES(is_reducer_options<EVS>, std::is_integral<D>)>
+    inline auto variance(E&& e, D const& ddof, EVS es = EVS())
+    {
+        auto cached_mean = mean<T>(e, es)();
+        return detail::mean_noaxis<T>(square(std::forward<E>(e) - std::move(cached_mean)), ddof, es);
+    }
+
+    template <class T = void, class E, class EVS = DEFAULT_STRATEGY_REDUCERS,
+              XTL_REQUIRES(is_reducer_options<EVS>)>
+    inline auto variance(E&& e, EVS es = EVS())
+    {
+        return variance<T>(std::forward<E>(e), 0u, es);
+    }
+
+    template <class T = void, class E, class EVS = DEFAULT_STRATEGY_REDUCERS,
+              XTL_REQUIRES(is_reducer_options<EVS>)>
+    inline auto stddev(E&& e, EVS es = EVS())
+    {
+        using result_type = std::conditional_t<std::is_same<T, void>::value, double, T>;
+        return cast<result_type>(sqrt(variance<T>(std::forward<E>(e), es)));
+    }
+
+    /**
+     * @ingroup red_functions
+     * @brief Compute the variance along the specified axes
+     *
+     * Returns the variance of the array elements, a measure of the spread of a
+     * distribution. The variance is computed for the flattened array by default,
+     * otherwise over the specified axes.
+     *
+     * Note: this function is not yet specialized for complex numbers.
+     *
+     * @param e an \ref xexpression
+     * @param axes the axes along which the variance is computed (optional)
+     * @param ddof delta degrees of freedom (optional)
+     * @param es evaluation strategy to use (lazy (default), or immediate)
+     * @return an \ref xexpression
+     *
+     * @sa stddev, mean
+     */
+    template <class T = void, class E, class X, class D, class EVS = DEFAULT_STRATEGY_REDUCERS,
+              XTL_REQUIRES(xtl::negation<is_reducer_options<X>>, std::is_integral<D>)>
+    inline auto variance(E&& e, X&& axes, const D& ddof, EVS es = EVS())
+    {
+        decltype(auto) sc = detail::shared_forward<E>(e);
+        // note: forcing copy of first axes argument -- is there a better solution?
+        auto axes_copy = axes;
+        // always eval to prevent repeated evaluations in the next calls
+        auto inner_mean = eval(mean<T>(sc, std::move(axes_copy), evaluation_strategy::immediate));
+
+        // fake keep_dims = 1
+        auto keep_dim_shape = e.shape();
+        for (const auto& el : axes)
+        {
+            keep_dim_shape[el] = 1u;
+        }
+
+        auto mrv = reshape_view<XTENSOR_DEFAULT_LAYOUT>(std::move(inner_mean), std::move(keep_dim_shape));
+        return detail::mean<T>(square(sc - std::move(mrv)), std::forward<X>(axes), ddof, es);
+    }
+
+    template <class T = void, class E, class X, class EVS = DEFAULT_STRATEGY_REDUCERS,
+              XTL_REQUIRES(xtl::negation<is_reducer_options<X>>, xtl::negation<std::is_integral<std::decay_t<X>>>, is_reducer_options<EVS>)>
+    inline auto variance(E&& e, X&& axes, EVS es = EVS())
+    {
+      return variance<T>(std::forward<E>(e), std::forward<X>(axes), 0u, es);
+    }
+
+    /**
+     * @ingroup red_functions
+     * @brief Compute the standard deviation along the specified axis.
+     *
+     * Returns the standard deviation, a measure of the spread of a distribution,
+     * of the array elements. The standard deviation is computed for the flattened
+     * array by default, otherwise over the specified axis.
+     *
+     * Note: this function is not yet specialized for complex numbers.
+     *
+     * @param e an \ref xexpression
+     * @param axes the axes along which the standard deviation is computed (optional)
+     * @param es evaluation strategy to use (lazy (default), or immediate)
+     * @return an \ref xexpression
+     *
+     * @sa variance, mean
+     */
+    template <class T = void, class E, class X, class EVS = DEFAULT_STRATEGY_REDUCERS,
+              XTL_REQUIRES(xtl::negation<is_reducer_options<X>>)>
+    inline auto stddev(E&& e, X&& axes, EVS es = EVS())
+    {
+        using result_type = std::conditional_t<std::is_same<T, void>::value, double, T>;
+        return cast<result_type>(sqrt(variance<T>(std::forward<E>(e), std::forward<X>(axes), es)));
+    }
+
+#ifndef X_OLD_CLANG
+    template <class T = void, class E, class A, std::size_t N, class EVS = DEFAULT_STRATEGY_REDUCERS>
+    inline auto stddev(E&& e, const A (&axes)[N], EVS es = EVS())
+    {
+        return stddev<T>(std::forward<E>(e),
+                         xtl::forward_sequence<std::array<std::size_t, N>, decltype(axes)>(axes),
+                         es);
+    }
+
+    template <class T = void, class E, class A, std::size_t N, class EVS = DEFAULT_STRATEGY_REDUCERS,
+              XTL_REQUIRES(is_reducer_options<EVS>)>
+    inline auto variance(E&& e, const A (&axes)[N], EVS es = EVS())
+    {
+        return variance<T>(std::forward<E>(e),
+                           xtl::forward_sequence<std::array<std::size_t, N>, decltype(axes)>(axes),
+                           es);
+    }
+
+    template <class T = void, class E, class A, std::size_t N, class D, class EVS = DEFAULT_STRATEGY_REDUCERS>
+    inline auto variance(E&& e, const A (&axes)[N], D const& ddof, EVS es = EVS())
+    {
+      return variance<T>(std::forward<E>(e),
+                         xtl::forward_sequence<std::array<std::size_t, N>, decltype(axes)>(axes),
+                         ddof,
+                         es);
+    }
+#else
+    template <class T = void, class E, class A, class EVS = DEFAULT_STRATEGY_REDUCERS>
+    inline auto stddev(E&& e, std::initializer_list<A> axes, EVS es = EVS())
+    {
+        return stddev<T>(std::forward<E>(e),
+                         xtl::forward_sequence<dynamic_shape<std::size_t>, decltype(axes)>(axes),
+                         es);
+    }
+
+    template <class T = void, class E, class A, class EVS = DEFAULT_STRATEGY_REDUCERS,
+              XTL_REQUIRES(is_reducer_options<EVS>)>
+    inline auto variance(E&& e, std::initializer_list<A> axes, EVS es = EVS())
+    {
+        return variance<T>(std::forward<E>(e),
+                           xtl::forward_sequence<dynamic_shape<std::size_t>, decltype(axes)>(axes),
+                           es);
+    }
+
+    template <class T = void, class E, class A, class D, class EVS = DEFAULT_STRATEGY_REDUCERS>
+    inline auto variance(E&& e, std::initializer_list<A> axes, D const& ddof, EVS es = EVS())
+    {
+        return variance<T>(std::forward<E>(e),
+                           xtl::forward_sequence<dynamic_shape<std::size_t>, decltype(axes)>(axes),
+                           ddof,
+                           es);
+    }
+#endif
+
+    /**
+     * @ingroup red_functions
+     * @brief Minimum and maximum among the elements of an array or expression.
+     *
+     * Returns an \ref xreducer for the minimum and maximum of an expression's elements.
+     * @param e an \ref xexpression
+     * @param es evaluation strategy to use (lazy (default), or immediate)
+     * @return an \ref xexpression of type ``std::array<value_type, 2>``, whose first
+     *         and second element represent the minimum and maximum respectively
+     */
+    template <class E, class EVS = DEFAULT_STRATEGY_REDUCERS,
+              XTL_REQUIRES(is_reducer_options<EVS>)>
+    inline auto minmax(E&& e, EVS es = EVS())
+    {
+        using std::min;
+        using std::max;
+        using value_type = typename std::decay_t<E>::value_type;
+        using result_type = std::array<value_type, 2>;
+
+        auto reduce_func = [](result_type r, value_type const& v) {
+            r[0] = (min)(r[0], v);
+            r[1] = (max)(r[1], v);
+            return r;
+        };
+        auto init_func = []() {
+            return result_type{std::numeric_limits<value_type>::max(), std::numeric_limits<value_type>::lowest()};
+        };
+        auto merge_func = [](result_type r, result_type const& s) {
+            r[0] = (min)(r[0], s[0]);
+            r[1] = (max)(r[1], s[1]);
+            return r;
+        };
+        return xt::reduce(make_xreducer_functor(std::move(reduce_func),
+                                                std::move(init_func),
+                                                std::move(merge_func)),
+                      std::forward<E>(e), arange(e.dimension()), es);
+    }
 
     /**
      * @defgroup acc_functions accumulating functions
@@ -1630,17 +2282,17 @@ INT_SPECIALIZATION_IMPL(FUNC_NAME, RETURN_VAL, unsigned long long);             
      * @return an \ref xarray<T>
      */
     template <class E>
-    inline auto cumsum(E&& e, std::size_t axis) noexcept
+    inline auto cumsum(E&& e, std::ptrdiff_t axis)
     {
-        using result_type = big_promote_type_t<typename std::decay_t<E>::value_type>;
-        return accumulate(std::plus<result_type>(), std::forward<E>(e), axis);
+        using result_type = xtl::big_promote_type_t<typename std::decay_t<E>::value_type>;
+        return accumulate(make_xaccumulator_functor(std::plus<result_type>()), std::forward<E>(e), axis);
     }
 
     template <class E>
-    inline auto cumsum(E&& e) noexcept
+    inline auto cumsum(E&& e)
     {
-        using result_type = big_promote_type_t<typename std::decay_t<E>::value_type>;
-        return accumulate(std::plus<result_type>(), std::forward<E>(e));
+        using result_type = xtl::big_promote_type_t<typename std::decay_t<E>::value_type>;
+        return accumulate(make_xaccumulator_functor(std::plus<result_type>()), std::forward<E>(e));
     }
 
     /**
@@ -1654,17 +2306,776 @@ INT_SPECIALIZATION_IMPL(FUNC_NAME, RETURN_VAL, unsigned long long);             
      * @return an \ref xarray<T>
      */
     template <class E>
-    inline auto cumprod(E&& e, std::size_t axis) noexcept
+    inline auto cumprod(E&& e, std::ptrdiff_t axis)
     {
-        using result_type = big_promote_type_t<typename std::decay_t<E>::value_type>;
-        return accumulate(std::multiplies<result_type>(), std::forward<E>(e), axis);
+        using result_type = xtl::big_promote_type_t<typename std::decay_t<E>::value_type>;
+        return accumulate(make_xaccumulator_functor(std::multiplies<result_type>()), std::forward<E>(e), axis);
     }
 
     template <class E>
-    inline auto cumprod(E&& e) noexcept
+    inline auto cumprod(E&& e)
     {
-        using result_type = big_promote_type_t<typename std::decay_t<E>::value_type>;
-        return accumulate(std::multiplies<result_type>(), std::forward<E>(e));
+        using result_type = xtl::big_promote_type_t<typename std::decay_t<E>::value_type>;
+        return accumulate(make_xaccumulator_functor(std::multiplies<result_type>()), std::forward<E>(e));
+    }
+
+    /*****************
+     * nan functions *
+     *****************/
+
+    namespace detail
+    {
+        struct nan_to_num_functor
+        {
+            template <class A>
+            inline auto operator()(const A& a) const
+            {
+                if (math::isnan(a))
+                {
+                    return A(0);
+                }
+                if (math::isinf(a))
+                {
+                    if (a < 0)
+                    {
+                        return std::numeric_limits<A>::lowest();
+                    }
+                    else
+                    {
+                        return (std::numeric_limits<A>::max)();
+                    }
+                }
+                return a;
+            }
+        };
+
+        template <class T>
+        struct nan_plus
+        {
+            using value_type = T;
+            using result_type = value_type;
+
+            constexpr result_type operator()(const value_type lhs, const value_type rhs) const
+            {
+                return !math::isnan(rhs) ? lhs + rhs : lhs;
+            }
+        };
+
+        template <class T>
+        struct nan_multiplies
+        {
+            using value_type = T;
+            using result_type = value_type;
+
+            constexpr result_type operator()(const value_type lhs, const value_type rhs) const
+            {
+                return !math::isnan(rhs) ? lhs * rhs : lhs;
+            }
+        };
+
+        template <class T, int V>
+        struct nan_init
+        {
+            using value_type = T;
+            using result_type = T;
+            constexpr result_type operator()(const value_type lhs) const
+            {
+                return math::isnan(lhs) ? result_type(V) : lhs;
+            }
+        };
+    }
+
+    /**
+     * @defgroup  nan_functions nan functions
+     */
+
+    /**
+     * @ingroup nan_functions
+     * @brief Convert nan or +/- inf to numbers
+     *
+     * This functions converts nan to 0, and +inf to the highest, -inf to the lowest
+     * floating point value of the same type.
+     *
+     * @param e input \ref xexpression
+     * @return an \ref xexpression
+     */
+    template <class E>
+    inline auto nan_to_num(E&& e)
+    {
+        return detail::make_xfunction<detail::nan_to_num_functor>(std::forward<E>(e));
+    }
+
+#define XTENSOR_NAN_REDUCER_FUNCTION(NAME, FUNCTOR, RESULT_TYPE, NAN)                                             \
+    template <class T = void, class E, class X, class EVS = DEFAULT_STRATEGY_REDUCERS,                            \
+              XTL_REQUIRES(xtl::negation<is_reducer_options<X>>)>                                                 \
+    inline auto NAME(E&& e, X&& axes, EVS es = EVS())                                                             \
+    {                                                                                                             \
+        using result_type = std::conditional_t<std::is_same<T, void>::value, RESULT_TYPE, T>;                     \
+        using functor_type = FUNCTOR<result_type>;                                                                \
+        using init_functor_type = detail::nan_init<result_type, NAN>;                                             \
+        return xt::reduce(make_xreducer_functor(functor_type(), init_functor_type()), std::forward<E>(e),         \
+                      std::forward<X>(axes), es);                                                                 \
+    }                                                                                                             \
+                                                                                                                  \
+    template <class T = void, class E, class EVS = DEFAULT_STRATEGY_REDUCERS,                                     \
+              XTL_REQUIRES(is_reducer_options<EVS>)>                                                              \
+    inline auto NAME(E&& e, EVS es = EVS())                                                                       \
+    {                                                                                                             \
+        using result_type = std::conditional_t<std::is_same<T, void>::value, RESULT_TYPE, T>;                     \
+        using functor_type = FUNCTOR<result_type>;                                                                \
+        using init_functor_type = detail::nan_init<result_type, NAN>;                                             \
+        return xt::reduce(make_xreducer_functor(functor_type(), init_functor_type()), std::forward<E>(e), es);    \
+    }
+
+#define OLD_CLANG_NAN_REDUCER(NAME, FUNCTOR, RESULT_TYPE, NAN)                                                       \
+    template <class T = void, class E, class I, class EVS = DEFAULT_STRATEGY_REDUCERS>                               \
+        inline auto NAME(E&& e, std::initializer_list<I> axes, EVS es = EVS())                                       \
+        {                                                                                                            \
+            using result_type = std::conditional_t<std::is_same<T, void>::value, RESULT_TYPE, T>;                    \
+            using functor_type = FUNCTOR<result_type>;                                                               \
+            using init_functor_type = detail::nan_init<result_type, NAN>;                                            \
+            return xt::reduce(make_xreducer_functor(functor_type(), init_functor_type()), std::forward<E>(e), axes, es); \
+        }
+
+#define MODERN_CLANG_NAN_REDUCER(NAME, FUNCTOR, RESULT_TYPE, NAN)                                                 \
+    template <class T = void, class E, class I, std::size_t N, class EVS = DEFAULT_STRATEGY_REDUCERS>             \
+    inline auto NAME(E&& e, const I (&axes)[N], EVS es = EVS())                                                   \
+    {                                                                                                             \
+        using result_type = std::conditional_t<std::is_same<T, void>::value, RESULT_TYPE, T>;                     \
+        using functor_type = FUNCTOR<result_type>;                                                                \
+        using init_functor_type = detail::nan_init<result_type, NAN>;                                             \
+        return xt::reduce(make_xreducer_functor(functor_type(), init_functor_type()), std::forward<E>(e), axes, es);  \
+    }
+
+    /**
+     * @ingroup nan_functions
+     * @brief Sum of elements over given axes, replacing nan with 0.
+     *
+     * Returns an \ref xreducer for the sum of elements over given
+     * \em axes, replacing nan with 0.
+     * @param e an \ref xexpression
+     * @param axes the axes along which the sum is performed (optional)
+     * @param es evaluation strategy of the reducer (optional)
+     * @return an \ref xreducer
+     */
+    XTENSOR_REDUCER_FUNCTION(nansum, detail::nan_plus, typename std::decay_t<E>::value_type, 0)
+#ifdef X_OLD_CLANG
+    XTENSOR_OLD_CLANG_REDUCER(nansum, detail::nan_plus, typename std::decay_t<E>::value_type, 0)
+#else
+    XTENSOR_MODERN_CLANG_REDUCER(nansum, detail::nan_plus, typename std::decay_t<E>::value_type, 0)
+#endif
+
+    /**
+     * @ingroup nan_functions
+     * @brief Product of elements over given axes, replacing nan with 1.
+     *
+     * Returns an \ref xreducer for the sum of elements over given
+     * \em axes, replacing nan with 1.
+     * @param e an \ref xexpression
+     * @param axes the axes along which the sum is performed (optional)
+     * @param es evaluation strategy of the reducer (optional)
+     * @return an \ref xreducer
+     */
+    XTENSOR_REDUCER_FUNCTION(nanprod, detail::nan_multiplies, typename std::decay_t<E>::value_type, 1)
+#ifdef X_OLD_CLANG
+    XTENSOR_OLD_CLANG_REDUCER(nanprod, detail::nan_multiplies, typename std::decay_t<E>::value_type, 1)
+#else
+    XTENSOR_MODERN_CLANG_REDUCER(nanprod, detail::nan_multiplies, typename std::decay_t<E>::value_type, 1)
+#endif
+
+#undef XTENSOR_NAN_REDUCER_FUNCTION
+#undef OLD_CLANG_NAN_REDUCER
+#undef MODERN_CLANG_NAN_REDUCER
+
+#define COUNT_NON_ZEROS_CONTENT                                                 \
+    using result_type = std::size_t;                                            \
+    using value_type = typename std::decay_t<E>::value_type;                    \
+    auto init_fct = []() -> result_type                                         \
+    {                                                                           \
+        return 0;                                                               \
+    };                                                                          \
+    auto reduce_fct = [](const result_type& lhs, const value_type& rhs)         \
+         -> result_type                                                         \
+    {                                                                           \
+        return (rhs != value_type(0)) ? lhs + result_type(1) : lhs;             \
+    };                                                                          \
+    auto merge_func = std::plus<result_type>();                                 \
+
+    template <class E, class EVS = DEFAULT_STRATEGY_REDUCERS,
+              XTL_REQUIRES(is_reducer_options<EVS>)>
+    inline auto count_nonzero(E&& e, EVS es = EVS())
+    {
+        COUNT_NON_ZEROS_CONTENT;
+        return xt::reduce(make_xreducer_functor(std::move(reduce_fct), std::move(init_fct), std::move(merge_func)),
+                      std::forward<E>(e), es);
+    }
+
+    template <class E, class X, class EVS = DEFAULT_STRATEGY_REDUCERS,
+              XTL_REQUIRES(xtl::negation<is_reducer_options<X>>, xtl::negation<std::is_integral<X>>)>
+    inline auto count_nonzero(E&& e, X&& axes, EVS es = EVS())
+    {
+        COUNT_NON_ZEROS_CONTENT;
+        return xt::reduce(make_xreducer_functor(std::move(reduce_fct), std::move(init_fct), std::move(merge_func)),
+                      std::forward<E>(e), std::forward<X>(axes), es);
+    }
+
+    template <class E, class X, class EVS = DEFAULT_STRATEGY_REDUCERS,
+              XTL_REQUIRES(xtl::negation<is_reducer_options<X>>, std::is_integral<X>)>
+    inline auto count_nonzero(E&& e, X axis, EVS es = EVS())
+    {
+        return count_nonzero(std::forward<E>(e), {axis}, es);
+    }
+
+#ifdef X_OLD_CLANG
+    template <class E, class I, class EVS = DEFAULT_STRATEGY_REDUCERS>
+    inline auto count_nonzero(E&& e, std::initializer_list<I> axes, EVS es = EVS())
+    {
+        COUNT_NON_ZEROS_CONTENT;
+        return xt::reduce(make_xreducer_functor(std::move(reduce_fct), std::move(init_fct), std::move(merge_func)),
+                      std::forward<E>(e), axes, es);
+    }
+#else
+    template <class E, class I, std::size_t N, class EVS = DEFAULT_STRATEGY_REDUCERS>
+    inline auto count_nonzero(E&& e, const I (&axes)[N], EVS es = EVS())
+    {
+        COUNT_NON_ZEROS_CONTENT;
+        return xt::reduce(make_xreducer_functor(std::move(reduce_fct), std::move(init_fct), std::move(merge_func)),
+                      std::forward<E>(e), axes, es);
+    }
+#endif
+
+#undef COUNT_NON_ZEROS_CONTENT
+
+    template <class E, class EVS = DEFAULT_STRATEGY_REDUCERS,
+              XTL_REQUIRES(is_reducer_options<EVS>)>
+    inline auto count_nonnan(E&& e, EVS es = EVS())
+    {
+        return xt::count_nonzero(!xt::isnan(std::forward<E>(e)), es);
+    }
+
+    template <class E, class X, class EVS = DEFAULT_STRATEGY_REDUCERS,
+             XTL_REQUIRES(xtl::negation<is_reducer_options<X>>, xtl::negation<std::is_integral<X>>)>
+    inline auto count_nonnan(E&& e, X&& axes, EVS es = EVS())
+    {
+        return xt::count_nonzero(!xt::isnan(std::forward<E>(e)), std::forward<X>(axes), es);
+    }
+
+    template <class E, class X, class EVS = DEFAULT_STRATEGY_REDUCERS,
+             XTL_REQUIRES(xtl::negation<is_reducer_options<X>>, std::is_integral<X>)>
+    inline auto count_nonnan(E&& e, X&& axes, EVS es = EVS())
+    {
+        return xt::count_nonzero(!xt::isnan(std::forward<E>(e)), {axes}, es);
+    }
+
+#ifdef X_OLD_CLANG
+    template <class E, class I, class EVS = DEFAULT_STRATEGY_REDUCERS>
+    inline auto count_nonnan(E&& e, std::initializer_list<I> axes, EVS es = EVS())
+    {
+        return xt::count_nonzero(!xt::isnan(std::forward<E>(e)), axes, es);
+    }
+#else
+    template <class E, class I, std::size_t N, class EVS = DEFAULT_STRATEGY_REDUCERS>
+    inline auto count_nonnan(E&& e, const I (&axes)[N], EVS es = EVS())
+    {
+        return xt::count_nonzero(!xt::isnan(std::forward<E>(e)), axes, es);
+    }
+#endif
+
+    /**
+     * @ingroup nan_functions
+     * @brief Cumulative sum, replacing nan with 0.
+     *
+     * Returns an xaccumulator for the sum of elements over given
+     * \em axis, replacing nan with 0.
+     * @param e an \ref xexpression
+     * @param axis the axis along which the elements are accumulated (optional)
+     * @return an xaccumulator
+     */
+    template <class E>
+    inline auto nancumsum(E&& e, std::ptrdiff_t axis)
+    {
+        using result_type = xtl::big_promote_type_t<typename std::decay_t<E>::value_type>;
+        return accumulate(make_xaccumulator_functor(detail::nan_plus<result_type>(), detail::nan_init<result_type, 0>()), std::forward<E>(e), axis);
+    }
+
+    template <class E>
+    inline auto nancumsum(E&& e)
+    {
+        using result_type = xtl::big_promote_type_t<typename std::decay_t<E>::value_type>;
+        return accumulate(make_xaccumulator_functor(detail::nan_plus<result_type>(), detail::nan_init<result_type, 0>()), std::forward<E>(e));
+    }
+
+    /**
+     * @ingroup nan_functions
+     * @brief Cumulative product, replacing nan with 1.
+     *
+     * Returns an xaccumulator for the product of elements over given
+     * \em axis, replacing nan with 1.
+     * @param e an \ref xexpression
+     * @param axis the axis along which the elements are accumulated (optional)
+     * @return an xaccumulator
+     */
+    template <class E>
+    inline auto nancumprod(E&& e, std::ptrdiff_t axis)
+    {
+        using result_type = xtl::big_promote_type_t<typename std::decay_t<E>::value_type>;
+        return accumulate(make_xaccumulator_functor(detail::nan_multiplies<result_type>(), detail::nan_init<result_type, 1>()), std::forward<E>(e), axis);
+    }
+
+    template <class E>
+    inline auto nancumprod(E&& e)
+    {
+        using result_type = xtl::big_promote_type_t<typename std::decay_t<E>::value_type>;
+        return accumulate(make_xaccumulator_functor(detail::nan_multiplies<result_type>(), detail::nan_init<result_type, 1>()), std::forward<E>(e));
+    }
+
+    namespace detail
+    {
+        template <class T>
+        struct diff_impl
+        {
+            template <class Arg>
+            inline void operator()(Arg& ad, const std::size_t& n,
+                                   xstrided_slice_vector& slice1, xstrided_slice_vector& slice2,
+                                   std::size_t saxis)
+            {
+                for (std::size_t i = 0; i < n; ++i)
+                {
+                    slice2[saxis] = range(xnone(), ad.shape()[saxis] - 1);
+                    ad = strided_view(ad, slice1) - strided_view(ad, slice2);
+                }
+            }
+        };
+
+        template <>
+        struct diff_impl<bool>
+        {
+            template <class Arg>
+            inline void operator()(Arg& ad, const std::size_t& n,
+                                   xstrided_slice_vector& slice1, xstrided_slice_vector& slice2,
+                                   std::size_t saxis)
+            {
+                for (std::size_t i = 0; i < n; ++i)
+                {
+                    slice2[saxis] = range(xnone(), ad.shape()[saxis] - 1);
+                    ad = not_equal(strided_view(ad, slice1), strided_view(ad, slice2));
+                }
+            }
+        };
+    }
+
+    /**
+     * @ingroup red_functions
+     * @brief Mean of elements over given axes, excluding nans.
+     *
+     * Returns an \ref xreducer for the mean of elements over given
+     * \em axes, excluding nans.
+     * @param e an \ref xexpression
+     * @param axes the axes along which the mean is computed (optional)
+     * @param es the evaluation strategy (optional)
+     * @return an \ref xexpression
+     */
+    template <class T = void, class E, class X, class EVS = DEFAULT_STRATEGY_REDUCERS,
+              XTL_REQUIRES(xtl::negation<is_reducer_options<X>>)>
+    inline auto nanmean(E&& e, X&& axes, EVS es = EVS())
+    {
+        decltype(auto) sc = detail::shared_forward<E>(e);
+        // note: forcing copy of first axes argument -- is there a better solution?
+        auto axes_copy = axes;
+        using value_type = typename std::conditional_t<std::is_same<T, void>::value, double, T>;
+        // sum cannot always be a double. It could be a complex number which cannot operate on
+        // std::plus<double>.
+        return nansum<T>(sc, std::forward<X>(axes), es) / xt::cast<value_type>(count_nonnan(sc, std::move(axes_copy), es));
+    }
+
+    template <class T = void, class E, class EVS = DEFAULT_STRATEGY_REDUCERS,
+              XTL_REQUIRES(is_reducer_options<EVS>)>
+    inline auto nanmean(E&& e, EVS es = EVS())
+    {
+        decltype(auto) sc = detail::shared_forward<E>(e);
+        using value_type = typename std::conditional_t<std::is_same<T, void>::value, double, T>;
+        return nansum<T>(sc, es) / xt::cast<value_type>(count_nonnan(sc, es));
+    }
+
+#ifdef X_OLD_CLANG
+    template <class T = void, class E, class I, class EVS = DEFAULT_STRATEGY_REDUCERS>
+    inline auto nanmean(E&& e, std::initializer_list<I> axes, EVS es = EVS())
+    {
+        return nanmean<T>(std::forward<E>(e),
+                          xtl::forward_sequence<dynamic_shape<std::size_t>, decltype(axes)>(axes),
+                          es);
+    }
+#else
+    template <class T = void, class E, class I, std::size_t N, class EVS = DEFAULT_STRATEGY_REDUCERS>
+    inline auto nanmean(E&& e, const I (&axes)[N], EVS es = EVS())
+    {
+        return nanmean<T>(std::forward<E>(e),
+                          xtl::forward_sequence<std::array<std::size_t, N>, decltype(axes)>(axes),
+                          es);
+    }
+#endif
+
+    template <class T = void, class E, class EVS = DEFAULT_STRATEGY_REDUCERS,
+              XTL_REQUIRES(is_reducer_options<EVS>)>
+    inline auto nanvar(E&& e, EVS es = EVS())
+    {
+        decltype(auto) sc = detail::shared_forward<E>(e);
+        return nanmean<T>(square(sc - nanmean<T>(sc)), es);
+    }
+
+    template <class T = void, class E, class EVS = DEFAULT_STRATEGY_REDUCERS,
+              XTL_REQUIRES(is_reducer_options<EVS>)>
+    inline auto nanstd(E&& e, EVS es = EVS())
+    {
+        using result_type = typename std::conditional_t<std::is_same<T, void>::value, double, T>;
+        return cast<result_type>(sqrt(nanvar<T>(std::forward<E>(e), es)));
+    }
+
+    /**
+     * @ingroup red_functions
+     * @brief Compute the variance along the specified axes, excluding nans
+     *
+     * Returns the variance of the array elements, a measure of the spread of a
+     * distribution. The variance is computed for the flattened array by default,
+     * otherwise over the specified axes.
+     *
+     * Note: this function is not yet specialized for complex numbers.
+     *
+     * @param e an \ref xexpression
+     * @param axes the axes along which the variance is computed (optional)
+     * @param es evaluation strategy to use (lazy (default), or immediate)
+     * @return an \ref xexpression
+     *
+     * @sa nanstd, nanmean
+     */
+    template <class T = void, class E, class X, class EVS = DEFAULT_STRATEGY_REDUCERS,
+              XTL_REQUIRES(xtl::negation<is_reducer_options<X>>)>
+    inline auto nanvar(E&& e, X&& axes, EVS es = EVS())
+    {
+        decltype(auto) sc = detail::shared_forward<E>(e);
+        // note: forcing copy of first axes argument -- is there a better solution?
+        auto axes_copy = axes;
+        using result_type = typename std::conditional_t<std::is_same<T, void>::value, double, T>;
+        auto inner_mean = nanmean<result_type>(sc, std::move(axes_copy));
+
+        // fake keep_dims = 1
+        auto keep_dim_shape = e.shape();
+        for (const auto& el : axes)
+        {
+            keep_dim_shape[el] = 1;
+        }
+        auto mrv = reshape_view<XTENSOR_DEFAULT_LAYOUT>(std::move(inner_mean), std::move(keep_dim_shape));
+        return nanmean<result_type>(square(sc - std::move(mrv)), std::forward<X>(axes), es);
+    }
+
+    /**
+     * @ingroup red_functions
+     * @brief Compute the standard deviation along the specified axis, excluding nans.
+     *
+     * Returns the standard deviation, a measure of the spread of a distribution,
+     * of the array elements. The standard deviation is computed for the flattened
+     * array by default, otherwise over the specified axis.
+     *
+     * Note: this function is not yet specialized for complex numbers.
+     *
+     * @param e an \ref xexpression
+     * @param axes the axes along which the standard deviation is computed (optional)
+     * @param es evaluation strategy to use (lazy (default), or immediate)
+     * @return an \ref xexpression
+     *
+     * @sa nanvar, nanmean
+     */
+    template <class T = void, class E, class X, class EVS = DEFAULT_STRATEGY_REDUCERS,
+              XTL_REQUIRES(xtl::negation<is_reducer_options<X>>)>
+    inline auto nanstd(E&& e, X&& axes, EVS es = EVS())
+    {
+        using result_type = typename std::conditional_t<std::is_same<T, void>::value, double, T>;
+        return cast<result_type>(sqrt(nanvar<T>(std::forward<E>(e), std::forward<X>(axes), es)));
+    }
+
+#ifndef X_OLD_CLANG
+    template <class T = void, class E, class A, std::size_t N, class EVS = DEFAULT_STRATEGY_REDUCERS>
+    inline auto nanstd(E&& e, const A (&axes)[N], EVS es = EVS())
+    {
+        return nanstd<T>(std::forward<E>(e),
+                         xtl::forward_sequence<std::array<std::size_t, N>, decltype(axes)>(axes),
+                         es);
+    }
+
+    template <class T = void, class E, class A, std::size_t N, class EVS = DEFAULT_STRATEGY_REDUCERS>
+    inline auto nanvar(E&& e, const A (&axes)[N], EVS es = EVS())
+    {
+        return nanvar<T>(std::forward<E>(e),
+                         xtl::forward_sequence<std::array<std::size_t, N>, decltype(axes)>(axes),
+                         es);
+    }
+#else
+    template <class T = void, class E, class A, class EVS = DEFAULT_STRATEGY_REDUCERS>
+    inline auto nanstd(E&& e, std::initializer_list<A> axes, EVS es = EVS())
+    {
+        return nanstd<T>(std::forward<E>(e),
+                         xtl::forward_sequence<dynamic_shape<std::size_t>, decltype(axes)>(axes),
+                         es);
+    }
+
+    template <class T = void, class E, class A, class EVS = DEFAULT_STRATEGY_REDUCERS>
+    inline auto nanvar(E&& e, std::initializer_list<A> axes, EVS es = EVS())
+    {
+        return nanvar<T>(std::forward<E>(e),
+                         xtl::forward_sequence<dynamic_shape<std::size_t>, decltype(axes)>(axes),
+                         es);
+    }
+#endif
+
+    /**
+     * @ingroup red_functions
+     * @brief Calculate the n-th discrete difference along the given axis.
+     *
+     * Calculate the n-th discrete difference along the given axis. This function is not lazy (might change in the future).
+     * @param a an \ref xexpression
+     * @param n The number of times values are differenced. If zero, the input is returned as-is. (optional)
+     * @param axis The axis along which the difference is taken, default is the last axis.
+     * @return an xarray
+     */
+    template <class T>
+    auto diff(const xexpression<T>& a, std::size_t n = 1, std::ptrdiff_t axis = -1)
+    {
+        typename std::decay_t<T>::temporary_type ad = a.derived_cast();
+        std::size_t saxis = normalize_axis(ad.dimension(), axis);
+        if(n <= ad.size())
+        {
+
+            if (n != std::size_t(0))
+            {
+                xstrided_slice_vector slice1(ad.dimension(), all());
+                xstrided_slice_vector slice2(ad.dimension(), all());
+                slice1[saxis] = range(1, xnone());
+
+                detail::diff_impl<typename T::value_type> impl;
+                impl(ad, n, slice1, slice2, saxis);
+            }
+        }
+        else
+        {
+            auto shape = ad.shape();
+            shape[saxis] = std::size_t(0);
+            ad.resize(shape);
+        }
+        return ad;
+    }
+
+    /**
+     * @ingroup red_functions
+     * @brief Integrate along the given axis using the composite trapezoidal rule.
+     *
+     * Returns definite integral as approximated by trapezoidal rule. This function is not lazy (might change in the future).
+     * @param y an \ref xexpression
+     * @param dx the spacing between sample points (optional)
+     * @param axis the axis along which to integrate.
+     * @return an xarray
+     */
+    template <class T>
+    auto trapz(const xexpression<T>& y, double dx = 1.0, std::ptrdiff_t axis = -1)
+    {
+        auto& yd = y.derived_cast();
+        std::size_t saxis = normalize_axis(yd.dimension(), axis);
+
+        xstrided_slice_vector slice1(yd.dimension(), all());
+        xstrided_slice_vector slice2(yd.dimension(), all());
+        slice1[saxis] = range(1, xnone());
+        slice2[saxis] = range(xnone(), yd.shape()[saxis] - 1);
+
+        auto trap = dx * (strided_view(yd, slice1) + strided_view(yd, slice2)) * 0.5;
+
+        return eval(sum(trap, {saxis}));
+    }
+
+    /**
+     * @ingroup red_functions
+     * @brief Integrate along the given axis using the composite trapezoidal rule.
+     *
+     * Returns definite integral as approximated by trapezoidal rule. This function is not lazy (might change in the future).
+     * @param y an \ref xexpression
+     * @param x an \ref xexpression representing the sample points corresponding to the y values.
+     * @param axis the axis along which to integrate.
+     * @return an xarray
+     */
+    template <class T, class E>
+    auto trapz(const xexpression<T>& y, const xexpression<E>& x, std::ptrdiff_t axis = -1)
+    {
+        auto& yd = y.derived_cast();
+        auto& xd = x.derived_cast();
+        decltype(diff(x)) dx;
+
+        std::size_t saxis = normalize_axis(yd.dimension(), axis);
+
+        if (xd.dimension() == 1)
+        {
+            dx = diff(x);
+            typename std::decay_t<decltype(yd)>::shape_type shape;
+            resize_container(shape, yd.dimension());
+            std::fill(shape.begin(), shape.end(), 1);
+            shape[saxis] = dx.shape()[0];
+            dx.reshape(shape);
+        }
+        else
+        {
+            dx = diff(x, 1, axis);
+        }
+
+        xstrided_slice_vector slice1(yd.dimension(), all());
+        xstrided_slice_vector slice2(yd.dimension(), all());
+        slice1[saxis] = range(1, xnone());
+        slice2[saxis] = range(xnone(), yd.shape()[saxis] - 1);
+
+        auto trap = dx * (strided_view(yd, slice1) + strided_view(yd, slice2)) * 0.5;
+
+        return eval(sum(trap, {saxis}));
+    }
+
+    /**
+     * @ingroup basic_functions
+     * @brief Returns the one-dimensional piecewise linear interpolant to a function with given discrete data points (xp, fp), evaluated at x.
+     *
+     * @param x The x-coordinates at which to evaluate the interpolated values (sorted).
+     * @param xp The x-coordinates of the data points (sorted).
+     * @param fp The y-coordinates of the data points, same length as xp.
+     * @param left Value to return for x < xp[0].
+     * @param right Value to return for x > xp[-1]
+     * @return an one-dimensional xarray, same length as x.
+     */
+    template<class E1, class E2, class E3, typename T>
+    inline auto interp(const E1 &x, const E2 &xp, const E3 &fp, T left, T right)
+    {
+        using size_type = common_size_type_t<E1,E2,E3>;
+        using value_type = typename E3::value_type;
+
+        // basic checks
+        XTENSOR_ASSERT( xp.dimension() == 1 );
+        XTENSOR_ASSERT( std::is_sorted(x.cbegin(), x.cend()) );
+        XTENSOR_ASSERT( std::is_sorted(xp.cbegin(), xp.cend()) );
+
+        // allocate output
+        auto f = xtensor<value_type, 1>::from_shape(x.shape());
+
+        // counter in "x": from left
+        size_type i = 0;
+
+        // fill f[i] for x[i] <= xp[0]
+        for (; i < x.size() ; ++i)
+        {
+            if (x[i] > xp[0])
+            {
+                break;
+            }
+            f[i] = static_cast<value_type>(left);
+        }
+
+        // counter in "x": from right
+        // (index counts one right, to terminate the reverse loop, without risking being negative)
+        size_type imax = x.size();
+
+        // fill f[i] for x[-1] >= xp[-1]
+        for (; imax > 0 ; --imax)
+        {
+            if (x[imax-1] < xp[xp.size() - 1])
+            {
+                break;
+            }
+            f[imax-1] = static_cast<value_type>(right);
+        }
+
+        // catch edge case: all entries are "right"
+        if (imax == 0)
+        {
+            return f;
+        }
+
+        // set "imax" as actual index
+        // (counted one right, see above)
+        --imax;
+
+        // counter in "xp"
+        size_type ip = 1;
+
+        // fill f[i] for the interior
+        for (; i <= imax ; ++i)
+        {
+            // - search next value in "xp"
+            while (x[i] > xp[ip])
+            {
+                ++ip;
+            }
+            // - distances as doubles
+            double dfp = static_cast<double>(fp[ip] - fp[ip - 1]);
+            double dxp = static_cast<double>(xp[ip] - xp[ip - 1]);
+            double dx  = static_cast<double>(x[i] - xp[ip - 1]);
+            // - interpolate
+            f[i] = fp[ip - 1] + static_cast<value_type>(dfp / dxp * dx);
+        }
+
+        return f;
+    }
+
+    /**
+     * @ingroup basic_functions
+     * @brief Returns the one-dimensional piecewise linear interpolant to a function with given discrete data points (xp, fp), evaluated at x.
+     *
+     * @param x The x-coordinates at which to evaluate the interpolated values (sorted).
+     * @param xp The x-coordinates of the data points (sorted).
+     * @param fp The y-coordinates of the data points, same length as xp.
+     * @return an one-dimensional xarray, same length as x.
+     */
+    template<class E1, class E2, class E3>
+    inline auto interp(const E1 &x, const E2 &xp, const E3 &fp)
+    {
+        return interp(x, xp, fp, fp[0], fp[fp.size() - 1]);
+    }
+
+    /**
+     * @brief Returns the covariance matrix
+     *
+     * @param x one or two dimensional array
+     * @param y optional one-dimensional array to build covariance to x
+     */
+    template <class E1>
+    inline auto cov(const E1 &x, const E1 &y = E1())
+    {
+        using value_type = typename E1::value_type;
+
+        if (y.dimension() == 0)
+        {
+            auto s = x.shape();
+            using size_type = std::decay_t<decltype(s[0])>;
+            if (x.dimension() == 1)
+            {
+                auto covar = eval(zeros<value_type>({ 1, 1 }));
+                auto x_norm = x - eval(mean(x));
+                covar(0, 0) = std::inner_product(x_norm.begin(), x_norm.end(), x_norm.begin(), 0.0) / value_type(s[0] - 1);
+                return covar;
+            }
+
+            XTENSOR_ASSERT( x.dimension() == 2 );
+
+            auto covar = eval(zeros<value_type>({ s[0], s[0] }));
+            auto m = eval(mean(x, {1}));
+            m.reshape({m.shape()[0],1});
+            auto x_norm = x - m;
+            for (size_type i = 0; i < s[0]; i++)
+            {
+                auto xi = strided_view(x_norm, { range(i, i + 1), all() });
+                for (size_type j = i; j < s[0]; j++)
+                {
+                    auto xj = strided_view(x_norm, { range(j, j + 1), all() });
+                    covar(j, i) = std::inner_product(xi.begin(), xi.end(), xj.begin(), 0.0) / value_type(s[1] - 1);
+                }
+            }
+            return eval(covar + transpose(covar) - diag(diagonal(covar)));
+        }
+        else
+        {
+            return cov(eval(stack(xtuple(x, y))));
+        }
     }
 }
 

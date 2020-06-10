@@ -12,6 +12,8 @@
    }
    </style>
 
+.. _related-projects:
+
 Related projects
 ================
 
@@ -21,11 +23,13 @@ xtensor-python
 .. image:: xtensor-python.svg
    :alt: xtensor-python
 
-The xtensor-python_ project provides the implementation of container types compatible with ``xtensor``'s expression
-system, ``pyarray`` and ``pytensor`` which effectively wrap numpy arrays, allowing operating on numpy arrays inplace.
+The xtensor-python_ project provides the implementation of container types
+compatible with ``xtensor``'s expression system, ``pyarray`` and ``pytensor``
+which effectively wrap numpy arrays, allowing operating on numpy arrays
+in-place.
 
-Example 1: Use an algorithm of the C++ library on a numpy array inplace
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Example 1: Use an algorithm of the C++ library on a numpy array in-place
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **C++ code**
 
@@ -58,8 +62,6 @@ Example 1: Use an algorithm of the C++ library on a numpy array inplace
 **Python code**
 
 .. code::
-
-    Python Code
 
     import numpy as np
     import xtensor_python_test as xt
@@ -132,7 +134,8 @@ xtensor-python-cookiecutter
    :alt: xtensor-python-cookiecutter
    :width: 50%
 
-The xtensor-python-cookiecutter_ project helps extension authors create Python extension modules making use of `xtensor`.
+The xtensor-python-cookiecutter_ project helps extension authors create Python
+extension modules making use of `xtensor`.
 
 It takes care of the initial work of generating a project skeleton with
 
@@ -151,7 +154,10 @@ xtensor-julia
 .. image:: xtensor-julia.svg
    :alt: xtensor-julia
 
-The xtensor-julia_ project provides the implementation of container types compatible with ``xtensor``'s expression system, ``jlarray`` and ``jltensor`` which effectively wrap Julia arrays, allowing operating on Julia arrays inplace.
+The xtensor-julia_ project provides the implementation of container types
+compatible with ``xtensor``'s expression system, ``jlarray`` and ``jltensor``
+which effectively wrap Julia arrays, allowing operating on Julia arrays
+in-place.
 
 Example 1: Use an algorithm of the C++ library with a Julia array
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -242,11 +248,12 @@ xtensor-julia-cookiecutter
    :alt: xtensor-julia-cookiecutter
    :width: 50%
 
-The xtensor-julia-cookiecutter_ project helps extension authors create Julia extension modules making use of `xtensor`.
+The xtensor-julia-cookiecutter_ project helps extension authors create Julia
+extension modules making use of `xtensor`.
 
 It takes care of the initial work of generating a project skeleton with
 
-- A complete read-to-use Julia package 
+- A complete read-to-use Julia package
 
 A few examples included in the resulting project including
 
@@ -261,10 +268,12 @@ xtensor-r
 .. image:: xtensor-r.svg
    :alt: xtensor-r
 
-The xtensor-r_ project provides the implementation of container types compatible with ``xtensor``'s expression system, ``rarray`` and ``rtensor`` which effectively wrap R arrays, allowing operating on R arrays inplace.
+The xtensor-r_ project provides the implementation of container types
+compatible with ``xtensor``'s expression system, ``rarray`` and ``rtensor``
+which effectively wrap R arrays, allowing operating on R arrays in-place.
 
-Example 1: Use an algorithm of the C++ library on a R array inplace
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Example 1: Use an algorithm of the C++ library on a R array in-place
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **C++ code**
 
@@ -306,7 +315,10 @@ xtensor-blas
 .. image:: xtensor-blas.svg
    :alt: xtensor-blas
 
-The xtensor-blas_ project is an extension to the xtensor library, offering bindings to BLAS and LAPACK libraries through cxxblas and cxxlapack from the FLENS project. ``xtensor-blas`` powers the ``xt::linalg`` functionalities, which are the counterpart to numpy's ``linalg`` module.
+The xtensor-blas_ project is an extension to the xtensor library, offering
+bindings to BLAS and LAPACK libraries through cxxblas and cxxlapack from the
+FLENS project. ``xtensor-blas`` powers the ``xt::linalg`` functionalities,
+which are the counterpart to numpy's ``linalg`` module.
 
 xtensor-fftw
 ------------
@@ -314,7 +326,75 @@ xtensor-fftw
 .. image:: xtensor-fftw.svg
    :alt: xtensor-fftw
 
-The xtensor-fftw_ project is an extension to the xtensor library, offering bindings to the fftw library.  ``xtensor-fftw`` powers the ``xt::fftw`` functionalities, which are the counterpart to numpy's ``fft`` module.
+The xtensor-fftw_ project is an extension to the xtensor library, offering
+bindings to the fftw library.  ``xtensor-fftw`` powers the ``xt::fftw``
+functionalities, which are the counterpart to numpy's ``fft`` module.
+
+Example 1: Calculate a derivative in Fourier space
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Calculate the derivative of a (discretized) field in Fourier space, e.g. a sine shaped field ``sin``:
+
+**C++ code**
+
+.. code::
+
+    #include <xtensor-fftw/basic.hpp>   // rfft, irfft
+    #include <xtensor-fftw/helper.hpp>  // rfftscale
+    #include <xtensor/xarray.hpp>
+    #include <xtensor/xbuilder.hpp>     // xt::arange
+    #include <xtensor/xmath.hpp>        // xt::sin, cos
+    #include <complex>
+    #include <xtensor/xio.hpp>
+
+    // generate a sinusoid field
+    double dx = M_PI / 100;
+    xt::xarray<double> x = xt::arange(0., 2 * M_PI, dx);
+    xt::xarray<double> sin = xt::sin(x);
+
+    // transform to Fourier space
+    auto sin_fs = xt::fftw::rfft(sin);
+
+    // multiply by i*k
+    std::complex<double> i {0, 1};
+    auto k = xt::fftw::rfftscale<double>(sin.shape()[0], dx);
+    xt::xarray<std::complex<double>> sin_derivative_fs = xt::eval(i * k * sin_fs);
+
+    // transform back to normal space
+    auto sin_derivative = xt::fftw::irfft(sin_derivative_fs);
+
+    std::cout << "x:              " << x << std::endl;
+    std::cout << "sin:            " << sin << std::endl;
+    std::cout << "cos:            " << xt::cos(x) << std::endl;
+    std::cout << "sin_derivative: " << sin_derivative << std::endl;
+
+**Outputs**
+
+.. code::
+
+    x:              { 0.      ,  0.031416,  0.062832,  0.094248, ...,  6.251769}
+    sin:            { 0.000000e+00,  3.141076e-02,  6.279052e-02,  9.410831e-02, ..., -3.141076e-02}
+    cos:            { 1.000000e+00,  9.995066e-01,  9.980267e-01,  9.955620e-01, ...,  9.995066e-01}
+    sin_derivative: { 1.000000e+00,  9.995066e-01,  9.980267e-01,  9.955620e-01, ...,  9.995066e-01}
+
+xtensor-io
+----------
+
+.. image:: xtensor-io.svg
+   :alt: xtensor-io
+
+The xtensor-io_ project is an extension to the xtensor library for reading and
+writing image, sound and npz file formats to and from xtensor data structures.
+
+xtensor-ros
+-----------
+
+.. image:: xtensor-ros.svg
+   :alt: xtensor-ros
+
+The xtensor-ros_ project is an extension to the xtensor library providing
+helper functions to easily send and receive xtensor and xarray datastructures
+as ROS messages.
 
 xsimd
 -----
@@ -322,9 +402,13 @@ xsimd
 .. image:: xsimd.svg
    :alt: xsimd
 
-The xsimd_ project provides a unified API for making use of the SIMD features of modern preprocessors for C++ library authors. It also provides accelerated implementation of common mathematical functions operating on batches.
+The xsimd_ project provides a unified API for making use of the SIMD features
+of modern preprocessors for C++ library authors. It also provides accelerated
+implementation of common mathematical functions operating on batches.
 
-xsimd_ is an optional dependency to ``xtensor`` which enable SIMD vectorization of xtensor operations. This feature is enabled with the ``XTENSOR_USE_XSIMD`` compilation flag, which is set to *false* by default.
+xsimd_ is an optional dependency to ``xtensor`` which enable SIMD vectorization
+of xtensor operations. This feature is enabled with the ``XTENSOR_USE_XSIMD``
+compilation flag, which is set to ``false`` by default.
 
 xtl
 ---
@@ -332,14 +416,49 @@ xtl
 .. image:: xtl.svg
    :alt: xtl
 
-The xtl_ project, the only dependency of ``xtensor`` is a C++ template library holding the implementation of basic tools used accross the libraries in the QuantStack ecosystem.
+The xtl_ project, the only dependency of ``xtensor`` is a C++ template library
+holding the implementation of basic tools used across the libraries in the ecosystem.
 
-.. _xtensor-python: https://github.com/QuantStack/xtensor-python
-.. _xtensor-python-cookiecutter: https://github.com/QuantStack/xtensor-python-cookiecutter
-.. _xtensor-julia: https://github.com/QuantStack/xtensor-julia
-.. _xtensor-julia-cookiecutter: https://github.com/QuantStack/xtensor-julia-cookiecutter
-.. _xtensor-r: https://github.com/QuantStack/xtensor-r
-.. _xtensor-blas: https://github.com/QuantStack/xtensor-blas
+xframe
+------
+
+.. image:: xframe.svg
+   :alt: xframe
+
+The xframe_ project provides multi-dimensional labeled arrays and a data frame for C++,
+based on ``xtensor`` and ``xtl``.
+
+`xframe` provides
+
+- an extensible expression system enabling lazy broadcasting.
+- an API following the idioms of the C++ standard library.
+- tools to manipulate n-dimensional labeled tensor expressions.
+
+The API of xframe is inspired by xarray_, a Python package implementing labelled multi-dimensional arrays and datasets.
+
+z5
+--
+
+The z5_ project implements the zarr_ and n5_ storage specifications in C++.
+Both specifications describe chunked nd-array storage similar to HDF5, but
+use the filesystem to store chunks. This design allows for parallel write access
+and efficient cloud based storage, crucial requirements in modern big data applications.
+The project uses ``xtensor`` to represent arrays in memory
+and also provides a python wrapper based on ``xtensor-python``.
+
+.. _xtensor-python: https://github.com/xtensor-stack/xtensor-python
+.. _xtensor-python-cookiecutter: https://github.com/xtensor-stack/xtensor-python-cookiecutter
+.. _xtensor-julia: https://github.com/xtensor-stack/xtensor-julia
+.. _xtensor-julia-cookiecutter: https://github.com/xtensor-stack/xtensor-julia-cookiecutter
+.. _xtensor-r: https://github.com/xtensor-stack/xtensor-r
+.. _xtensor-blas: https://github.com/xtensor-stack/xtensor-blas
+.. _xtensor-io: https://github.com/xtensor-stack/xtensor-io
 .. _xtensor-fftw: https://github.com/egpbos/xtensor-fftw
-.. _xsimd: https://github.com/egpbos/xsimd
-.. _xtl: https://github.com/QuantStack/xtl
+.. _xtensor-ros: https://github.com/wolfv/xtensor_ros
+.. _xsimd: https://github.com/xtensor-stack/xsimd
+.. _xtl: https://github.com/xtensor-stack/xtl
+.. _xframe: https://github.com/xtensor-stack/xframe
+.. _z5: https://github.com/constantinpape/z5
+.. _zarr: https://github.com/zarr-developers/zarr
+.. _n5: https://github.com/saalfeldlab/n5i
+.. _xarray: http://xarray.pydata.org

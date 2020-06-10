@@ -1,5 +1,6 @@
 /***************************************************************************
-* Copyright (c) 2016, Johan Mabille, Sylvain Corlay and Wolf Vollprecht    *
+* Copyright (c) Johan Mabille, Sylvain Corlay and Wolf Vollprecht          *
+* Copyright (c) QuantStack                                                 *
 *                                                                          *
 * Distributed under the terms of the BSD 3-Clause License.                 *
 *                                                                          *
@@ -13,102 +14,49 @@
 #include <functional>
 #include <type_traits>
 
-#include "xtl/xsequence.hpp"
+#include <xtl/xsequence.hpp>
 
 #include "xfunction.hpp"
-//#include "xoptional.hpp"
 #include "xscalar.hpp"
 #include "xstrides.hpp"
+#include "xstrided_view.hpp"
 
 namespace xt
 {
-
-    template <class F, class R, class... CT>
-    class xoptional_function;
 
     /***********
      * helpers *
      ***********/
 
-    namespace detail
-    {
-        template <class T, class R>
-        struct functor_return_type
-        {
-            using type = R;
-            using simd_type = xsimd::simd_type<R>;
-        };
-
-        template <class T>
-        struct functor_return_type<T, bool>
-        {
-            using type = bool;
-            using simd_type = xsimd::simd_bool_type<T>;
-        };
-    }
-
-#define UNARY_OPERATOR_FUNCTOR_IMPL(NAME, OP, R)                                \
-    template <class T>                                                          \
+#define UNARY_OPERATOR_FUNCTOR(NAME, OP)                                        \
     struct NAME                                                                 \
     {                                                                           \
-        using return_type = xt::detail::functor_return_type<T, R>;              \
-        using argument_type = T;                                                \
-        using result_type = typename return_type::type;                         \
-        using simd_value_type = xsimd::simd_type<T>;                            \
-        using simd_result_type = typename return_type::simd_type;               \
-        constexpr result_type operator()(const T& arg) const                    \
+        template <class A1>                                                     \
+        constexpr auto operator()(const A1& arg) const                          \
         {                                                                       \
             return OP arg;                                                      \
         }                                                                       \
-        constexpr simd_result_type simd_apply(const simd_value_type& arg) const \
+        template <class B>                                                      \
+        constexpr auto simd_apply(const B& arg) const                           \
         {                                                                       \
             return OP arg;                                                      \
         }                                                                       \
-        template <class U>                                                      \
-        struct rebind                                                           \
-        {                                                                       \
-            using type = NAME<U>;                                               \
-        };                                                                      \
     }
 
-#define UNARY_OPERATOR_FUNCTOR(NAME, OP) UNARY_OPERATOR_FUNCTOR_IMPL(NAME, OP, T)
-#define UNARY_BOOL_OPERATOR_FUNCTOR(NAME, OP) UNARY_OPERATOR_FUNCTOR_IMPL(NAME, OP, bool)
-
-    /* In this macro, T is assumed to be the promote_type of all arguments.
-       Nonetheless, operator() is implemented as a function template,
-       because automatic conversion of the actual argument types to T may
-       cause 'possible loss of data' warnings, e.g. when T is double and an
-       argument is uint64_t.
-    */
-#define BINARY_OPERATOR_FUNCTOR_IMPL(NAME, OP, R)                                \
-    template <class T>                                                           \
+#define BINARY_OPERATOR_FUNCTOR(NAME, OP)                                        \
     struct NAME                                                                  \
     {                                                                            \
-        using return_type = xt::detail::functor_return_type<T, R>;               \
-        using first_argument_type = T;                                           \
-        using second_argument_type = T;                                          \
-        using result_type = typename return_type::type;                          \
-        using simd_value_type = xsimd::simd_type<T>;                             \
-        using simd_result_type = typename return_type::simd_type;                \
         template <class T1, class T2>                                            \
-        constexpr result_type operator()(const T1& arg1, const T2& arg2) const   \
+        constexpr auto operator()(T1&& arg1, T2&& arg2) const                    \
+        {                                                                        \
+            return (std::forward<T1>(arg1) OP std::forward<T2>(arg2));           \
+        }                                                                        \
+        template <class B>                                                       \
+        constexpr auto simd_apply(const B& arg1, const B& arg2) const            \
         {                                                                        \
             return (arg1 OP arg2);                                               \
         }                                                                        \
-        constexpr simd_result_type simd_apply(const simd_value_type& arg1,       \
-                                              const simd_value_type& arg2) const \
-        {                                                                        \
-            return (arg1 OP arg2);                                               \
-        }                                                                        \
-        template <class U>                                                       \
-        struct rebind                                                            \
-        {                                                                        \
-            using type = NAME<U>;                                                \
-        };                                                                       \
     }
-
-#define BINARY_OPERATOR_FUNCTOR(NAME, OP) BINARY_OPERATOR_FUNCTOR_IMPL(NAME, OP, T)
-#define BINARY_BOOL_OPERATOR_FUNCTOR(NAME, OP) BINARY_OPERATOR_FUNCTOR_IMPL(NAME, OP, bool)
 
     namespace detail
     {
@@ -120,68 +68,60 @@ namespace xt
         BINARY_OPERATOR_FUNCTOR(multiplies, *);
         BINARY_OPERATOR_FUNCTOR(divides, /);
         BINARY_OPERATOR_FUNCTOR(modulus, %);
-        BINARY_BOOL_OPERATOR_FUNCTOR(logical_or, ||);
-        BINARY_BOOL_OPERATOR_FUNCTOR(logical_and, &&);
-        UNARY_BOOL_OPERATOR_FUNCTOR(logical_not, !);
+        BINARY_OPERATOR_FUNCTOR(logical_or, ||);
+        BINARY_OPERATOR_FUNCTOR(logical_and, &&);
+        UNARY_OPERATOR_FUNCTOR(logical_not, !);
         BINARY_OPERATOR_FUNCTOR(bitwise_or, |);
         BINARY_OPERATOR_FUNCTOR(bitwise_and, &);
         BINARY_OPERATOR_FUNCTOR(bitwise_xor, ^);
         UNARY_OPERATOR_FUNCTOR(bitwise_not, ~);
-        BINARY_BOOL_OPERATOR_FUNCTOR(less, <);
-        BINARY_BOOL_OPERATOR_FUNCTOR(less_equal, <=);
-        BINARY_BOOL_OPERATOR_FUNCTOR(greater, >);
-        BINARY_BOOL_OPERATOR_FUNCTOR(greater_equal, >=);
-        BINARY_BOOL_OPERATOR_FUNCTOR(equal_to, ==);
-        BINARY_BOOL_OPERATOR_FUNCTOR(not_equal_to, !=);
+        BINARY_OPERATOR_FUNCTOR(left_shift, <<);
+        BINARY_OPERATOR_FUNCTOR(right_shift, >>);
+        BINARY_OPERATOR_FUNCTOR(less, <);
+        BINARY_OPERATOR_FUNCTOR(less_equal, <=);
+        BINARY_OPERATOR_FUNCTOR(greater, >);
+        BINARY_OPERATOR_FUNCTOR(greater_equal, >=);
+        BINARY_OPERATOR_FUNCTOR(equal_to, ==);
+        BINARY_OPERATOR_FUNCTOR(not_equal_to, !=);
 
-        template <class T>
         struct conditional_ternary
         {
-            using result_type = T;
-            using simd_value_type = xsimd::simd_type<T>;
-            using simd_bool_type = xsimd::simd_bool_type<T>;
+            template <class B>
+            using get_batch_bool = typename xt_simd::simd_traits<typename xt_simd::revert_simd_traits<B>::type>::bool_type;
 
-            constexpr result_type operator()(bool t1, const T& t2, const T& t3) const noexcept
+            template <class B, class A1, class A2>
+            constexpr auto operator()(const B& cond, const A1& v1, const A2& v2) const noexcept
             {
-                return t1 ? t2 : t3;
+                return xtl::select(cond, v1, v2);
             }
-            constexpr simd_value_type simd_apply(const simd_bool_type& t1,
-                                                 const simd_value_type& t2,
-                                                 const simd_value_type& t3) const noexcept
+
+            template <class B>
+            constexpr B simd_apply(const get_batch_bool<B>& t1,
+                                   const B& t2,
+                                   const B& t3) const noexcept
             {
-                return xsimd::select(t1, t2, t3);
+                return xt_simd::select(t1, t2, t3);
             }
-            template <class U>
-            struct rebind
-            {
-                using type = conditional_ternary<U>;
-            };
         };
 
         template <class R>
         struct cast
         {
-            template <class T>
             struct functor
             {
-                using return_type = xt::detail::functor_return_type<T, R>;
-                using argument_type = T;
-                using result_type = typename return_type::type;
-                using simd_value_type = xsimd::simd_type<T>;
-                using simd_result_type = typename return_type::simd_type;
-                constexpr result_type operator()(const T& arg) const
+                using result_type = R;
+
+                template <class A1>
+                constexpr result_type operator()(const A1& arg) const
                 {
                     return static_cast<R>(arg);
                 }
-                constexpr simd_result_type simd_apply(const simd_value_type& arg) const
+                // SIMD conversion disabled for now since it does not make sense
+                // in most of the cases
+                /*constexpr simd_result_type simd_apply(const simd_value_type& arg) const
                 {
                     return static_cast<R>(arg);
-                }
-                template <class U>
-                struct rebind
-                {
-                    using type = functor<U>;
-                };
+                }*/
             };
         };
 
@@ -191,70 +131,48 @@ namespace xt
         template <class F, class... E>
         struct select_xfunction_expression<xtensor_expression_tag, F, E...>
         {
-            using type = xfunction<F, typename F::result_type, E...>;
+            using type = xfunction<F, E...>;
         };
 
         template <class F, class... E>
         struct select_xfunction_expression<xoptional_expression_tag, F, E...>
         {
-            using type = xoptional_function<F, typename F::result_type, E...>;
+            using type = xfunction<F, E...>;
         };
 
         template <class Tag, class F, class... E>
         using select_xfunction_expression_t = typename select_xfunction_expression<Tag, F, E...>::type;
 
-        template <class Tag, template <class...> class F, class... E>
-        struct build_functor_type;
-
-        template <template <class...> class F, class... E>
-        struct build_functor_type<xtensor_expression_tag, F, E...>
-        {
-            using type = F<common_value_type_t<std::decay_t<E>...>>;
-        };
-
-        template <template <class...> class F, class... E>
-        struct build_functor_type<xoptional_expression_tag, F, E...>
-        {
-            using type = F<common_value_type_t<std::decay_t<E>...>>;
-        };
-
-        template <class Tag, template <class...> class F, class... E>
-        using build_functor_type_t = typename build_functor_type<Tag, F, E...>::type;
-
-        template <template <class...> class F, class... E>
-        inline auto make_xfunction(E&&... e) noexcept
-        {
-            using expression_tag = xexpression_tag_t<E...>;
-            using functor_type = build_functor_type_t<expression_tag, F, E...>;
-            using type = select_xfunction_expression_t<expression_tag, functor_type, const_xclosure_t<E>...>;
-            return type(functor_type(), std::forward<E>(e)...);
-        }
-
-        template <template <class...> class F, class... E>
+        template <class F, class... E>
         struct xfunction_type
         {
             using expression_tag = xexpression_tag_t<E...>;
-            using functor_type = build_functor_type_t<expression_tag, F, E...>;
+            using functor_type = F;
             using type = select_xfunction_expression_t<expression_tag,
                                                        functor_type,
                                                        const_xclosure_t<E>...>;
         };
 
+        template <class F, class... E>
+        inline auto make_xfunction(E&&... e) noexcept
+        {
+            using function_type = xfunction_type<F, E...>;
+            using functor_type = typename function_type::functor_type;
+            using type = typename function_type::type;
+            return type(functor_type(), std::forward<E>(e)...);
+        }
+
         // On MSVC, the second argument of enable_if_t is always evaluated, even if the condition is false.
         // Wrapping the xfunction type in the xfunction_type metafunction avoids this evaluation when
         // the condition is false, since it leads to a tricky bug preventing from using operator+ and operator-
         // on vector and arrays iterators.
-        template <template <class...> class F, class... E>
+        template <class F, class... E>
         using xfunction_type_t = typename std::enable_if_t<has_xexpression<std::decay_t<E>...>::value,
                                                            xfunction_type<F, E...>>::type;
     }
 
 #undef UNARY_OPERATOR_FUNCTOR
-#undef UNARY_BOOL_OPERATOR_FUNCTOR
-#undef UNARY_OPERATOR_FUNCTOR_IMPL
 #undef BINARY_OPERATOR_FUNCTOR
-#undef BINARY_BOOL_OPERATOR_FUNCTOR
-#undef BINARY_OPERATOR_FUNCTOR_IMPL
 
     /*************
      * operators *
@@ -376,11 +294,11 @@ namespace xt
      */
     template <class E1, class E2>
     inline auto operator%(E1&& e1, E2&& e2) noexcept
-    -> detail::xfunction_type_t<detail::modulus, E1, E2>
+        -> detail::xfunction_type_t<detail::modulus, E1, E2>
     {
         return detail::make_xfunction<detail::modulus>(std::forward<E1>(e1), std::forward<E2>(e2));
     }
-    
+
     /**
      * @defgroup logical_operators Logical operators
      */
@@ -507,6 +425,105 @@ namespace xt
     }
 
     /**
+     * @ingroup bitwise_operators
+     * @brief Bitwise left shift
+     *
+     * Returns an \ref xfunction for the element-wise bitwise left shift of e1
+     * by e2.
+     * @param e1 an \ref xexpression
+     * @param e2 an \ref xexpression
+     * @return an \ref xfunction
+     */
+    template <class E1, class E2>
+    inline auto left_shift(E1&& e1, E2&& e2) noexcept
+        -> detail::xfunction_type_t<detail::left_shift, E1, E2>
+    {
+        return detail::make_xfunction<detail::left_shift>(std::forward<E1>(e1), std::forward<E2>(e2));
+    }
+
+    /**
+     * @ingroup bitwise_operators
+     * @brief Bitwise left shift
+     *
+     * Returns an \ref xfunction for the element-wise bitwise left shift of e1
+     * by e2.
+     * @param e1 an \ref xexpression
+     * @param e2 an \ref xexpression
+     * @return an \ref xfunction
+     */
+    template <class E1, class E2>
+    inline auto right_shift(E1&& e1, E2&& e2) noexcept
+        -> detail::xfunction_type_t<detail::right_shift, E1, E2>
+    {
+        return detail::make_xfunction<detail::right_shift>(std::forward<E1>(e1), std::forward<E2>(e2));
+    }
+
+    namespace detail
+    {
+        // Shift operator is not available for all the types, so the xfunction type instantiation
+        // has to be delayed, enable_if_t is not sufficient
+        template <class F, class E1, class E2>
+        struct shift_function_getter
+        {
+            using type = xfunction_type_t<F, E1, E2>;
+        };
+
+        template <bool B, class T>
+        struct eval_enable_if
+        {
+            using type = typename T::type;
+        };
+
+        template <class T>
+        struct eval_enable_if<false, T>
+        {
+        };
+
+        template <bool B, class T>
+        using eval_enable_if_t = typename eval_enable_if<B, T>::type;
+
+        template <class F, class E1, class E2>
+        using shift_return_type_t = eval_enable_if_t<is_xexpression<std::decay_t<E1>>::value,
+                                                     shift_function_getter<F, E1, E2>>;
+    }
+
+    /**
+     * @ingroup bitwise_operators
+     * @brief Bitwise left shift
+     *
+     * Returns an \ref xfunction for the element-wise bitwise left shift of e1
+     * by e2.
+     * @param e1 an \ref xexpression
+     * @param e2 an \ref xexpression
+     * @return an \ref xfunction
+     * @sa left_shift
+     */
+    template <class E1, class E2>
+    inline auto operator<<(E1&& e1, E2&& e2) noexcept
+        -> detail::shift_return_type_t<detail::left_shift, E1, E2>
+    {
+        return left_shift(std::forward<E1>(e1), std::forward<E2>(e2));
+    }
+
+    /**
+     * @ingroup bitwise_operators
+     * @brief Bitwise right shift
+     *
+     * Returns an \ref xfunction for the element-wise bitwise right shift of e1
+     * by e2.
+     * @param e1 an \ref xexpression
+     * @param e2 an \ref xexpression
+     * @return an \ref xfunction
+     * @sa right_shift
+     */
+    template <class E1, class E2>
+    inline auto operator>>(E1&& e1, E2&& e2)
+        -> detail::shift_return_type_t<detail::right_shift, E1, E2>
+    {
+        return right_shift(std::forward<E1>(e1), std::forward<E2>(e2));
+    }
+
+    /**
      * @defgroup comparison_operators Comparison operators
      */
 
@@ -528,15 +545,15 @@ namespace xt
     }
 
     /**
-    * @ingroup comparison_operators
-    * @brief Lesser or equal
-    *
-    * Returns an \ref xfunction for the element-wise
-    * lesser or equal comparison of \a e1 and \a e2.
-    * @param e1 an \ref xexpression or a scalar
-    * @param e2 an \ref xexpression or a scalar
-    * @return an \ref xfunction
-    */
+     * @ingroup comparison_operators
+     * @brief Lesser or equal
+     *
+     * Returns an \ref xfunction for the element-wise
+     * lesser or equal comparison of \a e1 and \a e2.
+     * @param e1 an \ref xexpression or a scalar
+     * @param e2 an \ref xexpression or a scalar
+     * @return an \ref xfunction
+     */
     template <class E1, class E2>
     inline auto operator<=(E1&& e1, E2&& e2) noexcept
         -> detail::xfunction_type_t<detail::less_equal, E1, E2>
@@ -545,15 +562,15 @@ namespace xt
     }
 
     /**
-    * @ingroup comparison_operators
-    * @brief Greater than
-    *
-    * Returns an \ref xfunction for the element-wise
-    * greater than comparison of \a e1 and \a e2.
-    * @param e1 an \ref xexpression or a scalar
-    * @param e2 an \ref xexpression or a scalar
-    * @return an \ref xfunction
-    */
+     * @ingroup comparison_operators
+     * @brief Greater than
+     *
+     * Returns an \ref xfunction for the element-wise
+     * greater than comparison of \a e1 and \a e2.
+     * @param e1 an \ref xexpression or a scalar
+     * @param e2 an \ref xexpression or a scalar
+     * @return an \ref xfunction
+     */
     template <class E1, class E2>
     inline auto operator>(E1&& e1, E2&& e2) noexcept
         -> detail::xfunction_type_t<detail::greater, E1, E2>
@@ -562,15 +579,15 @@ namespace xt
     }
 
     /**
-    * @ingroup comparison_operators
-    * @brief Greater or equal
-    *
-    * Returns an \ref xfunction for the element-wise
-    * greater or equal comparison of \a e1 and \a e2.
-    * @param e1 an \ref xexpression or a scalar
-    * @param e2 an \ref xexpression or a scalar
-    * @return an \ref xfunction
-    */
+     * @ingroup comparison_operators
+     * @brief Greater or equal
+     *
+     * Returns an \ref xfunction for the element-wise
+     * greater or equal comparison of \a e1 and \a e2.
+     * @param e1 an \ref xexpression or a scalar
+     * @param e2 an \ref xexpression or a scalar
+     * @return an \ref xfunction
+     */
     template <class E1, class E2>
     inline auto operator>=(E1&& e1, E2&& e2) noexcept
         -> detail::xfunction_type_t<detail::greater_equal, E1, E2>
@@ -590,7 +607,8 @@ namespace xt
      * @return a boolean
      */
     template <class E1, class E2>
-    inline bool operator==(const xexpression<E1>& e1, const xexpression<E2>& e2)
+    inline std::enable_if_t<xoptional_comparable<E1, E2>::value, bool>
+    operator==(const xexpression<E1>& e1, const xexpression<E2>& e2)
     {
         const E1& de1 = e1.derived_cast();
         const E2& de2 = e2.derived_cast();
@@ -606,16 +624,16 @@ namespace xt
     }
 
     /**
-    * @ingroup comparison_operators
-    * @brief Inequality
-    *
-    * Returns true if \a e1 and \a e2 have different shapes
-    * or hold the different values. Unlike other comparison
-    * operators, this does not return an \ref xfunction.
-    * @param e1 an \ref xexpression or a scalar
-    * @param e2 an \ref xexpression or a scalar
-    * @return a boolean
-    */
+     * @ingroup comparison_operators
+     * @brief Inequality
+     *
+     * Returns true if \a e1 and \a e2 have different shapes
+     * or hold the different values. Unlike other comparison
+     * operators, this does not return an \ref xfunction.
+     * @param e1 an \ref xexpression or a scalar
+     * @param e2 an \ref xexpression or a scalar
+     * @return a boolean
+     */
     template <class E1, class E2>
     inline bool operator!=(const xexpression<E1>& e1, const xexpression<E2>& e2)
     {
@@ -623,15 +641,15 @@ namespace xt
     }
 
     /**
-    * @ingroup comparison_operators
-    * @brief Element-wise equality
-    *
-    * Returns an \ref xfunction for the element-wise
-    * equality of \a e1 and \a e2.
-    * @param e1 an \ref xexpression or a scalar
-    * @param e2 an \ref xexpression or a scalar
-    * @return an \ref xfunction
-    */
+     * @ingroup comparison_operators
+     * @brief Element-wise equality
+     *
+     * Returns an \ref xfunction for the element-wise
+     * equality of \a e1 and \a e2.
+     * @param e1 an \ref xexpression or a scalar
+     * @param e2 an \ref xexpression or a scalar
+     * @return an \ref xfunction
+     */
     template <class E1, class E2>
     inline auto equal(E1&& e1, E2&& e2) noexcept
         -> detail::xfunction_type_t<detail::equal_to, E1, E2>
@@ -640,20 +658,92 @@ namespace xt
     }
 
     /**
-    * @ingroup comparison_operators
-    * @brief Element-wise inequality
-    *
-    * Returns an \ref xfunction for the element-wise
-    * inequality of \a e1 and \a e2.
-    * @param e1 an \ref xexpression or a scalar
-    * @param e2 an \ref xexpression or a scalar
-    * @return an \ref xfunction
-    */
+     * @ingroup comparison_operators
+     * @brief Element-wise inequality
+     *
+     * Returns an \ref xfunction for the element-wise
+     * inequality of \a e1 and \a e2.
+     * @param e1 an \ref xexpression or a scalar
+     * @param e2 an \ref xexpression or a scalar
+     * @return an \ref xfunction
+     */
     template <class E1, class E2>
     inline auto not_equal(E1&& e1, E2&& e2) noexcept
         -> detail::xfunction_type_t<detail::not_equal_to, E1, E2>
     {
         return detail::make_xfunction<detail::not_equal_to>(std::forward<E1>(e1), std::forward<E2>(e2));
+    }
+
+    /**
+     * @ingroup comparison_operators
+     * @brief Lesser than
+     *
+     * Returns an \ref xfunction for the element-wise
+     * lesser than comparison of \a e1 and \a e2. This
+     * function is equivalent to operator<(E1&&, E2&&).
+     * @param e1 an \ref xexpression or a scalar
+     * @param e2 an \ref xexpression or a scalar
+     * @return an \ref xfunction
+     */
+    template <class E1, class E2>
+    inline auto less(E1&& e1, E2&& e2) noexcept
+        -> decltype(std::forward<E1>(e1) < std::forward<E2>(e2))
+    {
+        return std::forward<E1>(e1) < std::forward<E2>(e2);
+    }
+
+    /**
+     * @ingroup comparison_operators
+     * @brief Lesser or equal
+     *
+     * Returns an \ref xfunction for the element-wise
+     * lesser or equal comparison of \a e1 and \a e2. This
+     * function is equivalent to operator<=(E1&&, E2&&).
+     * @param e1 an \ref xexpression or a scalar
+     * @param e2 an \ref xexpression or a scalar
+     * @return an \ref xfunction
+     */
+    template <class E1, class E2>
+    inline auto less_equal(E1&& e1, E2&& e2) noexcept
+        -> decltype(std::forward<E1>(e1) <= std::forward<E2>(e2))
+    {
+        return std::forward<E1>(e1) <= std::forward<E2>(e2);
+    }
+
+    /**
+     * @ingroup comparison_operators
+     * @brief Greater than
+     *
+     * Returns an \ref xfunction for the element-wise
+     * greater than comparison of \a e1 and \a e2. This
+     * function is equivalent to operator>(E1&&, E2&&).
+     * @param e1 an \ref xexpression or a scalar
+     * @param e2 an \ref xexpression or a scalar
+     * @return an \ref xfunction
+     */
+    template <class E1, class E2>
+    inline auto greater(E1&& e1, E2&& e2) noexcept
+        -> decltype(std::forward<E1>(e1) > std::forward<E2>(e2))
+    {
+        return std::forward<E1>(e1) > std::forward<E2>(e2);
+    }
+
+    /**
+     * @ingroup comparison_operators
+     * @brief Greater or equal
+     *
+     * Returns an \ref xfunction for the element-wise
+     * greater or equal comparison of \a e1 and \a e2.
+     * This function is equivalent to operator>=(E1&&, E2&&).
+     * @param e1 an \ref xexpression or a scalar
+     * @param e2 an \ref xexpression or a scalar
+     * @return an \ref xfunction
+     */
+    template <class E1, class E2>
+    inline auto greater_equal(E1&& e1, E2&& e2) noexcept
+        -> decltype(std::forward<E1>(e1) >= std::forward<E2>(e2))
+    {
+        return std::forward<E1>(e1) >= std::forward<E2>(e2);
     }
 
     /**
@@ -675,50 +765,96 @@ namespace xt
         return detail::make_xfunction<detail::conditional_ternary>(std::forward<E1>(e1), std::forward<E2>(e2), std::forward<E3>(e3));
     }
 
+    namespace detail
+    {
+        template <layout_type L>
+        struct next_idx_impl;
+
+        template <>
+        struct next_idx_impl<layout_type::row_major>
+        {
+            template <class S, class I>
+            inline auto operator()(const S& shape, I& idx)
+            {
+                for (std::size_t j = shape.size(); j > 0; --j)
+                {
+                    std::size_t i = j - 1;
+                    if (idx[i] >= shape[i] - 1)
+                    {
+                        idx[i] = 0;
+                    }
+                    else
+                    {
+                        idx[i]++;
+                        return idx;
+                    }
+                }
+                // return empty index, happens at last iteration step, but remains unused
+                return I();
+            }
+        };
+
+        template <>
+        struct next_idx_impl<layout_type::column_major>
+        {
+            template <class S, class I>
+            inline auto operator()(const S& shape, I& idx)
+            {
+                for(std::size_t i = 0; i < shape.size(); ++i)
+                {
+                    if(idx[i] >= shape[i] - 1)
+                    {
+                        idx[i] = 0;
+                    }
+                    else
+                    {
+                        idx[i]++;
+                        return idx;
+                    }
+                }
+                // return empty index, happens at last iteration step, but remains unused
+                return I();
+            }
+        };
+
+        template <layout_type L = XTENSOR_DEFAULT_TRAVERSAL, class S, class I>
+        inline auto next_idx(const S& shape, I& idx)
+        {
+            next_idx_impl<L> nii;
+            return nii(shape, idx);
+        }
+    }
+
     /**
      * @ingroup logical_operators
      * @brief return vector of indices where T is not zero
      *
      * @param arr input array
-     * @return vector of \a index_types where arr is not equal to zero
+     * @return vector of vectors, one for each dimension of arr, containing
+     * the indices of the non-zero elements in that dimension
      */
     template <class T>
     inline auto nonzero(const T& arr)
-        -> std::vector<xindex_type_t<typename T::shape_type>>
     {
         auto shape = arr.shape();
         using index_type = xindex_type_t<typename T::shape_type>;
         using size_type = typename T::size_type;
 
         auto idx = xtl::make_sequence<index_type>(arr.dimension(), 0);
-        std::vector<index_type> indices;
-
-        auto next_idx = [&shape](index_type& idx) {
-            for (size_type j = shape.size(); j > 0; --j)
-            {
-                size_type i = j - 1;
-                if (idx[i] >= shape[i] - 1)
-                {
-                    idx[i] = 0;
-                }
-                else
-                {
-                    idx[i]++;
-                    return idx;
-                }
-            }
-            // return empty index, happens at last iteration step, but remains unused
-            return index_type();
-        };
+        std::vector<std::vector<size_type>> indices(arr.dimension());
 
         size_type total_size = compute_size(shape);
-        for (size_type i = 0; i < total_size; i++, next_idx(idx))
+        for (size_type i = 0; i < total_size; i++, detail::next_idx(shape, idx))
         {
             if (arr.element(std::begin(idx), std::end(idx)))
             {
-                indices.push_back(idx);
+                for (std::size_t n = 0; n < indices.size(); ++n)
+                {
+                    indices.at(n).push_back(idx[n]);
+                }
             }
         }
+
         return indices;
     }
 
@@ -732,9 +868,40 @@ namespace xt
      */
     template <class T>
     inline auto where(const T& condition)
-        -> std::vector<xindex_type_t<typename T::shape_type>>
     {
         return nonzero(condition);
+    }
+
+    /**
+     * @ingroup logical_operators
+     * @brief return vector of indices where arr is not zero
+     *
+     * @tparam L the traversal order
+     * @param arr input array
+     * @return vector of index_types where arr is not equal to zero (use `xt::from_indices` to convert)
+     *
+     * @sa xt::from_indices
+     */
+    template <layout_type L = XTENSOR_DEFAULT_TRAVERSAL, class T>
+    inline auto argwhere(const T& arr)
+    {
+        auto shape = arr.shape();
+        using index_type = xindex_type_t<typename T::shape_type>;
+        using size_type = typename T::size_type;
+
+        auto idx = xtl::make_sequence<index_type>(arr.dimension(), 0);
+        std::vector<index_type> indices;
+
+        size_type total_size = compute_size(shape);
+        for (size_type i = 0; i < total_size; i++, detail::next_idx<L>(shape, idx))
+        {
+            if (arr.element(std::begin(idx), std::end(idx)))
+            {
+                indices.push_back(idx);
+            }
+        }
+
+        return indices;
     }
 
     /**
@@ -750,16 +917,8 @@ namespace xt
     inline bool any(E&& e)
     {
         using xtype = std::decay_t<E>;
-        if (xtype::static_layout == layout_type::row_major || xtype::static_layout == layout_type::column_major)
-        {
-            return std::any_of(e.cbegin(), e.cend(),
-                               [](const typename std::decay_t<E>::value_type& el) { return el; });
-        }
-        else
-        {
-            return std::any_of(e.begin(), e.end(),
-                               [](const typename std::decay_t<E>::value_type& el) { return el; });
-        }
+        using value_type = typename xtype::value_type;
+        return std::any_of(e.cbegin(), e.cend(), [](const value_type& el) { return el; });
     }
 
     /**
@@ -775,16 +934,8 @@ namespace xt
     inline bool all(E&& e)
     {
         using xtype = std::decay_t<E>;
-        if (xtype::static_layout == layout_type::row_major || xtype::static_layout == layout_type::column_major)
-        {
-            return std::all_of(e.cbegin(), e.cend(),
-                               [](const typename std::decay_t<E>::value_type& el) { return el; });
-        }
-        else
-        {
-            return std::all_of(e.begin(), e.end(),
-                               [](const typename std::decay_t<E>::value_type& el) { return el; });
-        }
+        using value_type = typename xtype::value_type;
+        return std::all_of(e.cbegin(), e.cend(), [](const value_type& el) { return el; });
     }
 
     /**
@@ -804,10 +955,11 @@ namespace xt
 
     template <class R, class E>
     inline auto cast(E&& e) noexcept
-        -> detail::xfunction_type_t<detail::cast<R>::template functor, E>
+        -> detail::xfunction_type_t<typename detail::cast<R>::functor, E>
     {
-        return detail::make_xfunction<detail::cast<R>::template functor>(std::forward<E>(e));
+        return detail::make_xfunction<typename detail::cast<R>::functor>(std::forward<E>(e));
     }
+
 }
 
 #endif

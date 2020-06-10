@@ -7,6 +7,10 @@
 Expressions and semantic
 ========================
 
+``xexpression`` and the semantic classes contain all the methods required to perform evaluation and
+assignment of expressions. They define the computed assignment operators, the assignment methods for
+``noalias`` and the downcast methods.
+
 .. toctree::
 
    xexpression

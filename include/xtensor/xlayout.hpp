@@ -1,5 +1,6 @@
 /***************************************************************************
-* Copyright (c) 2016, Johan Mabille, Sylvain Corlay and Wolf Vollprecht    *
+* Copyright (c) Johan Mabille, Sylvain Corlay and Wolf Vollprecht          *
+* Copyright (c) QuantStack                                                 *
 *                                                                          *
 * Distributed under the terms of the BSD 3-Clause License.                 *
 *                                                                          *
@@ -9,6 +10,9 @@
 #ifndef XTENSOR_LAYOUT_HPP
 #define XTENSOR_LAYOUT_HPP
 
+// Do not include anything else here.
+// xlayout.hpp is included in xtensor_forward.hpp
+// and we don't want to bring other headers to it.
 #include "xtensor_config.hpp"
 
 namespace xt
@@ -16,7 +20,7 @@ namespace xt
     /*! layout_type enum for xcontainer based xexpressions */
     enum class layout_type
     {
-        /*! dynamic layout_type: you can reshape to row major, column major, or use custom strides */
+        /*! dynamic layout_type: you can resize to row major, column major, or use custom strides */
         dynamic = 0x00,
         /*! layout_type compatible with all others */
         any = 0xFF,
@@ -86,7 +90,7 @@ namespace xt
     constexpr layout_type default_assignable_layout(layout_type l) noexcept
     {
         return (l == layout_type::row_major || l == layout_type::column_major) ?
-            l : DEFAULT_LAYOUT;
+            l : XTENSOR_DEFAULT_LAYOUT;
     }
 }
 

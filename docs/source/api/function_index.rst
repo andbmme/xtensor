@@ -14,4 +14,9 @@ Functions and generators
    xaccumulator
    xgenerator
    xbuilder
+   xmanipulation
+   xsort
+   xset_operation
    xrandom
+   xhistogram
+   xpad

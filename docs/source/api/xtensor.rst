@@ -18,3 +18,12 @@ Defined in ``xtensor/xtensor.hpp``
 
 .. doxygentypedef:: xt::xtensor_optional
    :project: xtensor
+
+.. doxygenfunction:: xt::from_indices
+   :project: xtensor
+
+.. doxygenfunction:: xt::flatten_indices
+   :project: xtensor
+
+.. doxygenfunction:: xt::ravel_indices
+   :project: xtensor

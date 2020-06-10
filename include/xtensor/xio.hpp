@@ -1,5 +1,6 @@
 /***************************************************************************
-* Copyright (c) 2016, Johan Mabille, Sylvain Corlay and Wolf Vollprecht    *
+* Copyright (c) Johan Mabille, Sylvain Corlay and Wolf Vollprecht          *
+* Copyright (c) QuantStack                                                 *
 *                                                                          *
 * Distributed under the terms of the BSD 3-Clause License.                 *
 *                                                                          *
@@ -19,13 +20,7 @@
 
 #include "xexpression.hpp"
 #include "xmath.hpp"
-#include "xview.hpp"
-
-#ifdef _WIN32
-    using precision_type = typename std::streamsize;
-#else
-    using precision_type = int;
-#endif
+#include "xstrided_view.hpp"
 
 namespace xt
 {
@@ -33,14 +28,18 @@ namespace xt
     template <class E>
     inline std::ostream& operator<<(std::ostream& out, const xexpression<E>& e);
 
+    /*****************
+     * print options *
+     *****************/
+
     namespace print_options
     {
         struct print_options_impl
         {
-            std::size_t edgeitems = 3;
-            std::size_t line_width = 75;
-            std::size_t threshold = 1000;
-            precision_type precision = -1;  // default precision
+            int edge_items = 3;
+            int line_width = 75;
+            int threshold = 1000;
+            int precision = -1;  // default precision
         };
 
         inline print_options_impl& print_options()
@@ -55,7 +54,7 @@ namespace xt
          *
          * @param line_width The line width
          */
-        inline void set_line_width(std::size_t line_width)
+        inline void set_line_width(int line_width)
         {
             print_options().line_width = line_width;
         }
@@ -66,7 +65,7 @@ namespace xt
          * @param threshold The number of elements in the xexpression that triggers
          *                  summarization in the output
          */
-        inline void set_threshold(std::size_t threshold)
+        inline void set_threshold(int threshold)
         {
             print_options().threshold = threshold;
         }
@@ -76,11 +75,11 @@ namespace xt
          *        triggered, this value defines how many items of each dimension
          *        are printed.
          *
-         * @param edgeitems The number of edge items
+         * @param edge_items The number of edge items
          */
-        inline void set_edgeitems(std::size_t edgeitems)
+        inline void set_edge_items(int edge_items)
         {
-            print_options().edgeitems = edgeitems;
+            print_options().edge_items = edge_items;
         }
 
         /**
@@ -88,11 +87,97 @@ namespace xt
          *
          * @param precision The number of digits for floating point output
          */
-        inline void set_precision(precision_type precision)
+        inline void set_precision(int precision)
         {
             print_options().precision = precision;
         }
-    }
+
+#define DEFINE_LOCAL_PRINT_OPTION(NAME)                                   \
+        class NAME                                                        \
+        {                                                                 \
+        public:                                                           \
+                                                                          \
+            NAME(int value) : m_value(value)                              \
+            {                                                             \
+                id();                                                     \
+            }                                                             \
+            static int id()                                               \
+            {                                                             \
+                static int id = std::ios_base::xalloc();                  \
+                return id;                                                \
+            }                                                             \
+            int value() const                                             \
+            {                                                             \
+                return m_value;                                           \
+            }                                                             \
+                                                                          \
+        private:                                                          \
+                                                                          \
+            int m_value;                                                  \
+        };                                                                \
+                                                                          \
+        inline std::ostream& operator<<(std::ostream& out, const NAME& n) \
+        {                                                                 \
+            out.iword(NAME::id()) = n.value();                            \
+            return out;                                                   \
+        }
+
+        /**
+         * @class line_width
+         *
+         * io manipulator used to set the width of the lines when printing
+         * an expression.
+         *
+         * \code{.cpp}
+         * using po = xt::print_options;
+         * xt::xarray<double> a = {{1, 2, 3}, {4, 5, 6}};
+         * std::cout << po::line_width(100) << a << std::endl;
+         * \endcode
+         */
+        DEFINE_LOCAL_PRINT_OPTION(line_width)
+
+        /**
+         * @class threshold
+         *
+         * io manipulator used to set the threshold after which summarization is
+         * triggered.
+         *
+         * \code{.cpp}
+         * using po = xt::print_options;
+         * xt::xarray<double> a = xt::rand::randn<double>({2000, 500});
+         * std::cout << po::threshold(50) << a << std::endl;
+         * \endcode
+         */
+        DEFINE_LOCAL_PRINT_OPTION(threshold)
+
+       /**
+         * @class edge_items
+         *
+         * io manipulator used to set the number of egde items if
+         * the summarization is triggered.
+         *
+         * \code{.cpp}
+         * using po = xt::print_options;
+         * xt::xarray<double> a = xt::rand::randn<double>({2000, 500});
+         * std::cout << po::edge_items(5) << a << std::endl;
+         * \endcode
+         */
+        DEFINE_LOCAL_PRINT_OPTION(edge_items)
+
+       /**
+         * @class precision
+         *
+         * io manipulator used to set the precision of the floating point values
+         * when printing an expression.
+         *
+         * \code{.cpp}
+         * using po = xt::print_options;
+         * xt::xarray<double> a = xt::rand::randn<double>({2000, 500});
+         * std::cout << po::precision(5) << a << std::endl;
+         * \endcode
+         */
+        DEFINE_LOCAL_PRINT_OPTION(precision)
+   }
 
     /**************************************
      * xexpression ostream implementation *
@@ -100,131 +185,101 @@ namespace xt
 
     namespace detail
     {
-        template <std::size_t I>
-        struct xout
+        template <class E, class F>
+        std::ostream& xoutput(std::ostream& out, const E& e,
+                              xstrided_slice_vector& slices, F& printer, std::size_t blanks,
+                              std::streamsize element_width, std::size_t edgeitems, std::size_t line_width)
         {
-            template <class E, class F>
-            static std::ostream& output(std::ostream& out, const E& e, F& printer, std::size_t blanks,
-                                        precision_type element_width, std::size_t edgeitems, std::size_t line_width)
+            using size_type = typename E::size_type;
+
+            const auto view = xt::strided_view(e, slices);
+            if (view.dimension() == 0)
             {
-                using size_type = typename E::size_type;
+                printer.print_next(out);
+            }
+            else
+            {
+                std::string indents(blanks, ' ');
 
-                if (e.dimension() == 0)
+                size_type i = 0;
+                size_type elems_on_line = 0;
+                size_type ewp2 = static_cast<size_type>(element_width) + size_type(2);
+                size_type line_lim = static_cast<size_type>(std::floor(line_width / ewp2));
+
+                out << '{';
+                for (; i != size_type(view.shape()[0] - 1); ++i)
                 {
-                    printer.print_next(out);
-                }
-                else
-                {
-                    std::string indents(blanks, ' ');
-
-                    size_type i = 0;
-                    size_type elems_on_line = 0;
-                    size_type ewp2 = static_cast<size_type>(element_width) + size_type(2);
-                    size_type line_lim = static_cast<size_type>(std::floor(line_width / ewp2));
-
-                    out << '{';
-                    for (; i != e.shape()[0] - 1; ++i)
+                    if (edgeitems && size_type(view.shape()[0]) > (edgeitems * 2) && i == edgeitems)
                     {
-                        if (edgeitems && e.shape()[0] > (edgeitems * 2) && i == edgeitems)
+                        out << "..., ";
+                        if (view.dimension() > 1)
                         {
-                            out << "..., ";
-                            if (e.dimension() > 1)
-                            {
-                                elems_on_line = 0;
-                                out << std::endl
-                                    << indents;
-                            }
-                            i = e.shape()[0] - edgeitems;
-                        }
-                        if (e.dimension() == 1 && line_lim != 0 && elems_on_line >= line_lim)
-                        {
-                            out << std::endl
-                                << indents;
                             elems_on_line = 0;
-                        }
-
-                        xout<I - 1>::output(out, view(e, i), printer, blanks + 1, element_width, edgeitems, line_width) << ',';
-
-                        elems_on_line++;
-
-                        if (I == 1 || e.dimension() == 1)
-                        {
-                            out << ' ';
-                        }
-                        else
-                        {
                             out << std::endl
                                 << indents;
                         }
+                        i = size_type(view.shape()[0]) - edgeitems;
                     }
-                    if (e.dimension() == 1 && line_lim != 0 && elems_on_line >= line_lim)
+                    if (view.dimension() == 1 && line_lim != 0 && elems_on_line >= line_lim)
+                    {
+                        out << std::endl
+                            << indents;
+                        elems_on_line = 0;
+                    }
+                    slices.push_back(static_cast<int>(i));
+                    xoutput(out, e, slices, printer, blanks + 1, element_width, edgeitems, line_width) << ',';
+                    slices.pop_back();
+                    elems_on_line++;
+
+                    if (view.dimension() == 1)
+                    {
+                        out << ' ';
+                    }
+                    else
                     {
                         out << std::endl
                             << indents;
                     }
-                    xout<I - 1>::output(out, view(e, i), printer, blanks + 1, element_width, edgeitems, line_width) << '}';
                 }
-                return out;
+                if (view.dimension() == 1 && line_lim != 0 && elems_on_line >= line_lim)
+                {
+                    out << std::endl
+                        << indents;
+                }
+                slices.push_back(static_cast<int>(i));
+                xoutput(out, e, slices, printer, blanks + 1, element_width, edgeitems, line_width) << '}';
+                slices.pop_back();
             }
-        };
+            return out;
+        }
 
-        template <>
-        struct xout<0>
+        template <class F, class E>
+        static void recurser_run(F& fn, const E& e, xstrided_slice_vector& slices, std::size_t lim = 0)
         {
-            template <class E, class F>
-            static std::ostream& output(std::ostream& out, const E& e, F& printer,
-                                        std::size_t, precision_type, std::size_t, std::size_t)
+            using size_type = typename E::size_type;
+            const auto view = strided_view(e, slices);
+            if (view.dimension() == 0)
             {
-                if (e.dimension() == 0)
-                {
-                    return printer.print_next(out);
-                }
-                else
-                {
-                    return out << "{...}";
-                }
+                fn.update(view());
             }
-        };
-
-        template <std::size_t I>
-        struct recurser
-        {
-            template <class F, class E>
-            static void run(F& fn, const E& e, std::size_t lim = 0)
+            else
             {
-                using size_type = typename E::size_type;
-                if (e.dimension() == 0)
+                size_type i = 0;
+                for (; i != static_cast<size_type>(view.shape()[0] - 1); ++i)
                 {
-                    fn.update(e());
-                }
-                else
-                {
-                    size_type i = 0;
-                    for (; i != e.shape()[0] - 1; ++i)
+                    if (lim && size_type(view.shape()[0]) > (lim * 2) && i == lim)
                     {
-                        if (lim && e.shape()[0] > (lim * 2) && i == lim)
-                        {
-                            i = e.shape()[0] - lim;
-                        }
-                        recurser<I - 1>::run(fn, view(e, i), lim);
+                        i = static_cast<size_type>(view.shape()[0]) - lim;
                     }
-                    recurser<I - 1>::run(fn, view(e, i), lim);
+                    slices.push_back(static_cast<int>(i));
+                    recurser_run(fn, e, slices, lim);
+                    slices.pop_back();
                 }
+                slices.push_back(static_cast<int>(i));
+                recurser_run(fn, e, slices, lim);
+                slices.pop_back();
             }
-        };
-
-        template <>
-        struct recurser<0>
-        {
-            template <class F, class E>
-            static void run(F& fn, const E& e, std::size_t)
-            {
-                if (e.dimension() == 0)
-                {
-                    fn.update(e());
-                }
-            }
-        };
+        }
 
         template <class T, class E = void>
         struct printer;
@@ -232,11 +287,11 @@ namespace xt
         template <class T>
         struct printer<T, std::enable_if_t<std::is_floating_point<typename T::value_type>::value>>
         {
-            using value_type = typename T::value_type;
+            using value_type = std::decay_t<typename T::value_type>;
             using cache_type = std::vector<value_type>;
             using cache_iterator = typename cache_type::const_iterator;
 
-            printer(precision_type precision)
+            explicit printer(std::streamsize precision)
                 : m_precision(precision)
             {
             }
@@ -257,10 +312,10 @@ namespace xt
                 }
                 else
                 {
-                    precision_type decimals = 1;  // print a leading 0
+                    std::streamsize decimals = 1;  // print a leading 0
                     if (std::floor(m_max) != 0)
                     {
-                        decimals += (precision_type)std::log10(std::floor(m_max));
+                        decimals += std::streamsize(std::log10(std::floor(m_max)));
                     }
                     // 2 => sign and dot
                     m_width = 2 + decimals + m_precision;
@@ -276,8 +331,11 @@ namespace xt
                 if (!m_scientific)
                 {
                     std::stringstream buf;
-                    buf << std::setw(m_width) << std::fixed << std::setprecision(m_precision) << (*m_it);
-                    if (!m_required_precision)
+                    buf.width(m_width);
+                    buf << std::fixed;
+                    buf.precision(m_precision);
+                    buf << (*m_it);
+                    if (!m_required_precision && !std::isinf(*m_it) && !std::isnan(*m_it))
                     {
                         buf << '.';
                     }
@@ -294,12 +352,17 @@ namespace xt
                 {
                     if (!m_large_exponent)
                     {
-                        out << std::scientific << std::setw(m_width) << (*m_it);
+                        out << std::scientific;
+                        out.width(m_width);
+                        out << (*m_it);
                     }
                     else
                     {
                         std::stringstream buf;
-                        buf << std::setw(m_width) << std::scientific << std::setprecision(m_precision) << (*m_it);
+                        buf.width(m_width);
+                        buf << std::scientific;
+                        buf.precision(m_precision);
+                        buf << (*m_it);
                         std::string res = buf.str();
 
                         if (res[res.size() - 4] == 'e')
@@ -320,7 +383,7 @@ namespace xt
                 {
                     if (!m_scientific || !m_large_exponent)
                     {
-                        int exponent = 1 + (int)std::log10(math::abs(val));
+                        int exponent = 1 + int(std::log10(math::abs(val)));
                         if (exponent <= -5 || exponent > 7)
                         {
                             m_scientific = true;
@@ -346,7 +409,7 @@ namespace xt
                 m_cache.push_back(val);
             }
 
-            precision_type width()
+            std::streamsize width()
             {
                 return m_width;
             }
@@ -355,9 +418,9 @@ namespace xt
 
             bool m_large_exponent = false;
             bool m_scientific = false;
-            precision_type m_width = 9;
-            precision_type m_precision;
-            precision_type m_required_precision = 0;
+            std::streamsize m_width = 9;
+            std::streamsize m_precision;
+            std::streamsize m_required_precision = 0;
             value_type m_max = 0;
 
             cache_type m_cache;
@@ -367,25 +430,26 @@ namespace xt
         template <class T>
         struct printer<T, std::enable_if_t<std::is_integral<typename T::value_type>::value && !std::is_same<typename T::value_type, bool>::value>>
         {
-            using value_type = typename T::value_type;
+            using value_type = std::decay_t<typename T::value_type>;
             using cache_type = std::vector<value_type>;
             using cache_iterator = typename cache_type::const_iterator;
 
-            printer(precision_type)
+            explicit printer(std::streamsize)
             {
             }
 
             void init()
             {
                 m_it = m_cache.cbegin();
-                m_width = 1 + (precision_type)std::log10(m_max) + m_sign;
+                m_width = 1 + std::streamsize((m_max > 0) ? std::log10(m_max) : 0) + m_sign;
             }
 
             std::ostream& print_next(std::ostream& out)
             {
                 // + enables printing of chars etc. as numbers
                 // TODO should chars be printed as numbers?
-                out << std::setw(m_width) << +(*m_it);
+                out.width(m_width);
+                out << +(*m_it);
                 ++m_it;
                 return out;
             }
@@ -403,14 +467,14 @@ namespace xt
                 m_cache.push_back(val);
             }
 
-            precision_type width()
+            std::streamsize width()
             {
                 return m_width;
             }
 
         private:
 
-            precision_type m_width;
+            std::streamsize m_width;
             bool m_sign = false;
             value_type m_max = 0;
 
@@ -425,7 +489,7 @@ namespace xt
             using cache_type = std::vector<bool>;
             using cache_iterator = typename cache_type::const_iterator;
 
-            printer(precision_type)
+            explicit printer(std::streamsize)
             {
             }
 
@@ -444,8 +508,8 @@ namespace xt
                 {
                     out << "false";
                 }
-                // the following std::setw(5) isn't working correctly on OSX.
-                // out << std::boolalpha << std::setw(m_width) << (*m_it);
+                // TODO: the following std::setw(5) isn't working correctly on OSX.
+                //out << std::boolalpha << std::setw(m_width) << (*m_it);
                 ++m_it;
                 return out;
             }
@@ -455,14 +519,14 @@ namespace xt
                 m_cache.push_back(val);
             }
 
-            precision_type width()
+            std::streamsize width()
             {
                 return m_width;
             }
 
         private:
 
-            precision_type m_width = 5;
+            std::streamsize m_width = 5;
 
             cache_type m_cache;
             cache_iterator m_it;
@@ -471,11 +535,11 @@ namespace xt
         template <class T>
         struct printer<T, std::enable_if_t<xtl::is_complex<typename T::value_type>::value>>
         {
-            using value_type = typename T::value_type;
+            using value_type = std::decay_t<typename T::value_type>;
             using cache_type = std::vector<bool>;
             using cache_iterator = typename cache_type::const_iterator;
 
-            printer(precision_type precision)
+            explicit printer(std::streamsize precision)
                 : real_printer(precision), imag_printer(precision)
             {
             }
@@ -520,7 +584,7 @@ namespace xt
                 m_signs.push_back(std::signbit(val.imag()));
             }
 
-            precision_type width()
+            std::streamsize width()
             {
                 return real_printer.width() + imag_printer.width() + 2;
             }
@@ -535,11 +599,12 @@ namespace xt
         template <class T>
         struct printer<T, std::enable_if_t<!std::is_fundamental<typename T::value_type>::value && !xtl::is_complex<typename T::value_type>::value>>
         {
-            using value_type = typename T::value_type;
+            using const_reference = typename T::const_reference;
+            using value_type = std::decay_t<typename T::value_type>;
             using cache_type = std::vector<std::string>;
             using cache_iterator = typename cache_type::const_iterator;
 
-            printer(precision_type)
+            explicit printer(std::streamsize)
             {
             }
 
@@ -554,31 +619,32 @@ namespace xt
 
             std::ostream& print_next(std::ostream& out)
             {
-                out << std::setw(m_width) << *m_it;
+                out.width(m_width);
+                out << *m_it;
                 ++m_it;
                 return out;
             }
 
-            void update(const value_type& val)
+            void update(const_reference val)
             {
                 std::stringstream buf;
                 buf << val;
                 std::string s = buf.str();
                 if (int(s.size()) > m_width)
                 {
-                    m_width = int(s.size());
+                    m_width = std::streamsize(s.size());
                 }
                 m_cache.push_back(s);
             }
 
-            precision_type width()
+            std::streamsize width()
             {
                 return m_width;
             }
 
         private:
 
-            precision_type m_width = 0;
+            std::streamsize m_width = 0;
             cache_type m_cache;
             cache_iterator m_it;
         };
@@ -586,7 +652,7 @@ namespace xt
         template <class E>
         struct custom_formatter
         {
-            using value_type = typename E::value_type;
+            using value_type = std::decay_t<typename E::value_type>;
 
             template <class F>
             custom_formatter(F&& func)
@@ -603,40 +669,79 @@ namespace xt
 
             std::function<std::string(const value_type&)> m_func;
         };
+    }
 
-        template <class S>
-        struct recursion_depth
-        {
-            static constexpr std::size_t value = 5;
-        };
+    inline print_options::print_options_impl get_print_options(std::ostream& out)
+    {
+        print_options::print_options_impl res;
+        using print_options::edge_items;
+        using print_options::line_width;
+        using print_options::threshold;
+        using print_options::precision;
 
-// Note: std::min is not constexpr on old versions of gcc (4.x) and clang.
-#define XTENSOR_MIN(x, y) (x > y ? y : x)
-        template <class T, std::size_t N>
-        struct recursion_depth<std::array<T, N>>
-        {
-            static constexpr std::size_t value = XTENSOR_MIN(5, N);
-        };
-#undef XTENSOR_MIN
+        res.edge_items = static_cast<int>(out.iword(edge_items::id()));
+        res.line_width = static_cast<int>(out.iword(line_width::id()));
+        res.threshold = static_cast<int>(out.iword(threshold::id()));
+        res.precision = static_cast<int>(out.iword(precision::id()));
+
+        if(!res.edge_items) { res.edge_items = print_options::print_options().edge_items; }
+        else { out.iword(edge_items::id()) = long(0); }
+        if(!res.line_width) { res.line_width = print_options::print_options().line_width; }
+        else { out.iword(line_width::id()) = long(0); }
+        if(!res.threshold) { res.threshold = print_options::print_options().threshold; }
+        else { out.iword(threshold::id()) = long(0); }
+        if(!res.precision) { res.precision = print_options::print_options().precision; }
+        else { out.iword(precision::id()) = long(0); }
+
+        return res;
     }
 
     template <class E, class F>
     std::ostream& pretty_print(const xexpression<E>& e, F&& func, std::ostream& out = std::cout)
     {
-        xfunction<detail::custom_formatter<E>, std::string, const_xclosure_t<E>> print_fun(detail::custom_formatter<E>(std::forward<F>(func)), e);
+        xfunction<detail::custom_formatter<E>, const_xclosure_t<E>> print_fun(detail::custom_formatter<E>(std::forward<F>(func)), e);
         return pretty_print(print_fun, out);
+    }
+
+    namespace detail
+    {
+        template <class S>
+        class fmtflags_guard
+        {
+        public:
+
+            explicit fmtflags_guard(S& stream)
+                : m_stream(stream), m_flags(stream.flags())
+            {
+            }
+
+            ~fmtflags_guard()
+            {
+                m_stream.flags(m_flags);
+            }
+
+        private:
+
+            S& m_stream;
+            std::ios_base::fmtflags m_flags;
+        };
     }
 
     template <class E>
     std::ostream& pretty_print(const xexpression<E>& e, std::ostream& out = std::cout)
     {
+        detail::fmtflags_guard<std::ostream> guard(out);
+
         const E& d = e.derived_cast();
 
-        size_t lim = 0;
+        std::size_t lim = 0;
         std::size_t sz = compute_size(d.shape());
-        if (sz > print_options::print_options().threshold)
+
+        auto po = get_print_options(out);
+
+        if (sz > static_cast<std::size_t>(po.threshold))
         {
-            lim = print_options::print_options().edgeitems;
+            lim = static_cast<std::size_t>(po.edge_items);
         }
         if (sz == 0)
         {
@@ -644,22 +749,23 @@ namespace xt
             return out;
         }
 
-        precision_type temp_precision = (precision_type)out.precision();
-        precision_type precision = temp_precision;
-        if (print_options::print_options().precision != -1)
+        auto temp_precision = out.precision();
+        auto precision = temp_precision;
+        if (po.precision != -1)
         {
-            out << std::setprecision(print_options::print_options().precision);
-            precision = print_options::print_options().precision;
+            out.precision(static_cast<std::streamsize>(po.precision));
+            precision = static_cast<std::streamsize>(po.precision);
         }
 
         detail::printer<E> p(precision);
 
-        constexpr std::size_t depth = detail::recursion_depth<typename E::shape_type>::value;
-        detail::recurser<depth>::run(p, d, lim);
+        xstrided_slice_vector sv;
+        detail::recurser_run(p, d, sv, lim);
         p.init();
-        detail::xout<depth>::output(out, d, p, 1, p.width(), lim, print_options::print_options().line_width);
+        sv.clear();
+        xoutput(out, d, sv, p, 1, p.width(), lim, static_cast<std::size_t>(po.line_width));
 
-        out << std::setprecision(temp_precision);  // restore precision
+        out.precision(temp_precision);  // restore precision
 
         return out;
     }
@@ -670,5 +776,10 @@ namespace xt
         return pretty_print(e, out);
     }
 }
+#endif
 
+// Backward compatibility: include xmime.hpp in xio.hpp by default.
+
+#ifdef __CLING__
+#include "xmime.hpp"
 #endif

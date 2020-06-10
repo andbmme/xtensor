@@ -1,17 +1,26 @@
 /***************************************************************************
-* Copyright (c) 2016, Johan Mabille, Sylvain Corlay and Wolf Vollprecht    *
+* Copyright (c) Johan Mabille, Sylvain Corlay and Wolf Vollprecht          *
+* Copyright (c) QuantStack                                                 *
 *                                                                          *
 * Distributed under the terms of the BSD 3-Clause License.                 *
 *                                                                          *
 * The full license is in the file LICENSE, distributed with this software. *
 ****************************************************************************/
 
-#include "gtest/gtest.h"
 #include <initializer_list>
 #include <type_traits>
 #include <tuple>
 #include <complex>
+
+#include "gtest/gtest.h"
+#include "test_common_macros.hpp"
+#include "xtensor/xtensor.hpp"
+#include "xtensor/xarray.hpp"
+#include "xtensor/xfixed.hpp"
+#include "xtensor/xstrided_view.hpp"
+#include "xtensor/xshape.hpp"
 #include "xtensor/xutils.hpp"
+#include "xtensor/xview.hpp"
 
 namespace xt
 {
@@ -56,6 +65,7 @@ namespace xt
         auto t = std::make_tuple(a, b, c, d);
         for_each(fn, t);
         ASSERT_TRUE(a == fn.a && b == fn.b && c == fn.c && d == fn.d);
+        EXPECT_FALSE(noexcept(for_each(fn, t)));
     }
 
     TEST(utils, accumulate)
@@ -63,6 +73,11 @@ namespace xt
         auto func = [](int i, int j) { return i + j; };
         const std::tuple<int, int, int> t(3, 4, 1);
         EXPECT_EQ(8, accumulate(func, 0, t));
+        EXPECT_FALSE(noexcept(accumulate(func, 0, t)));
+
+        auto func_ne = [](int i, int j) noexcept { return i + j; };
+        EXPECT_EQ(8, accumulate(func_ne, 0, t));
+        EXPECT_TRUE(noexcept(accumulate(func_ne, 0, t)));
     }
 
     template <class... T>
@@ -72,54 +87,18 @@ namespace xt
         return apply<int>(1, func, t);
     }
 
+    int fun(int i) noexcept{ return 2 * i; }
     TEST(utils, apply)
     {
         ASSERT_TRUE(foo(std::make_tuple(1, 2, 3)) == 2);
-    }
-
-    TEST(utils, initializer_dimension)
-    {
-        size_t d0 = initializer_dimension<double>::value;
-        size_t d1 = initializer_dimension<std::initializer_list<double>>::value;
-        size_t d2 = initializer_dimension<std::initializer_list<std::initializer_list<double>>>::value;
-        EXPECT_EQ(size_t(0), d0);
-        EXPECT_EQ(size_t(1), d1);
-        EXPECT_EQ(size_t(2), d2);
-    }
-
-    TEST(utils, promote_shape)
-    {
-        bool expect_v = std::is_same<
-            std::vector<size_t>,
-            promote_shape_t<std::vector<size_t>, std::array<size_t, 3>, std::array<size_t, 2>>
-        >::value;
-
-        bool expect_a = std::is_same<
-            std::array<size_t, 3>,
-            promote_shape_t<std::array<size_t, 2>, std::array<size_t, 3>, std::array<size_t, 2>>
-        >::value;
-
-        ASSERT_TRUE(expect_v);
-        ASSERT_TRUE(expect_a);
-    }
-
-    TEST(utils, shape)
-    {
-        auto s0 = shape<std::vector<size_t>>(3);
-        auto s1 = shape<std::vector<size_t>>(std::initializer_list<size_t>{1, 2});
-        auto s2 = shape<std::vector<size_t>>(std::initializer_list<std::initializer_list<size_t>>{{1, 2, 4}, {1, 3, 5}});
-
-        std::vector<size_t> e0 = {};
-        std::vector<size_t> e1 = {2};
-        std::vector<size_t> e2 = {2, 3};
-
-        ASSERT_TRUE(check_shape(3, s0.begin(), s0.end()));
-        ASSERT_TRUE(check_shape(std::initializer_list<size_t>{1, 2}, s1.begin(), s1.end()));
-        ASSERT_TRUE(check_shape(std::initializer_list<std::initializer_list<size_t>>{{1, 2, 4}, {1, 3, 5}}, s2.begin(), s2.end()));
-
-        EXPECT_EQ(e0, s0);
-        EXPECT_EQ(e1, s1);
-        EXPECT_EQ(e2, s2);
+        EXPECT_FALSE(noexcept(foo(std::make_tuple(1, 2, 3))));
+        auto func_ne = [](int i) noexcept { return i; };
+        auto t = std::make_tuple(1, 2, 3);
+#if (_MSC_VER >= 1910)
+        EXPECT_FALSE(noexcept(apply<int>(1, func_ne, t)));
+#else
+        EXPECT_TRUE(noexcept(apply<int>(1, func_ne, t)));
+#endif
     }
 
     TEST(utils, conditional_cast)
@@ -128,45 +107,121 @@ namespace xt
         EXPECT_TRUE((std::is_same<decltype(conditional_cast<true, double>(1)), double>::value));
     }
 
-    TEST(utils, promote_traits)
+    TEST(utils, has_data_interface)
     {
-        EXPECT_TRUE((std::is_same<promote_type_t<uint8_t>, int>::value));
-        EXPECT_TRUE((std::is_same<promote_type_t<int>, int>::value));
-        EXPECT_TRUE((std::is_same<promote_type_t<float>, float>::value));
-        EXPECT_TRUE((std::is_same<promote_type_t<double>, double>::value));
-        EXPECT_TRUE((std::is_same<promote_type_t<bool>, bool>::value));
+        bool b = has_data_interface<xarray<int>>::value;
+        EXPECT_TRUE(b);
+        b = has_data_interface<const xarray<int>>::value;
+        EXPECT_TRUE(b);
+        b = has_data_interface<const xtensor<double, 2>>::value;
+        EXPECT_TRUE(b);
+        b = has_data_interface<const xtensor_fixed<double, xshape<3, 4>>>::value;
+        EXPECT_TRUE(b);
 
-        EXPECT_TRUE((std::is_same<big_promote_type_t<uint8_t>, unsigned long long>::value));
-        EXPECT_TRUE((std::is_same<big_promote_type_t<short>, long long>::value));
-        EXPECT_TRUE((std::is_same<big_promote_type_t<int>, long long>::value));
-        EXPECT_TRUE((std::is_same<big_promote_type_t<float>, double>::value));
-        EXPECT_TRUE((std::is_same<big_promote_type_t<double>, double>::value));
+        xarray<int> a = xarray<int>::from_shape({3, 4, 5});
+        auto f = a + a - 23;
+        auto v2 = strided_view(a, {all(), 1, all()});
+        auto vv2 = strided_view(v2, {all(), 2});
+        auto v3 = strided_view(f, {all(), 2});
 
-        EXPECT_TRUE((std::is_same<real_promote_type_t<uint8_t>, double>::value));
-        EXPECT_TRUE((std::is_same<real_promote_type_t<int>, double>::value));
-        EXPECT_TRUE((std::is_same<real_promote_type_t<float>, float>::value));
-        EXPECT_TRUE((std::is_same<real_promote_type_t<double>, double>::value));
-
-        EXPECT_TRUE((std::is_same<bool_promote_type_t<bool>, uint8_t>::value));
-        EXPECT_TRUE((std::is_same<bool_promote_type_t<int>, int>::value));
+        b = has_data_interface<decltype(v2)>::value;
+        EXPECT_TRUE(b);
+        b = has_data_interface<decltype(vv2)>::value;
+        EXPECT_TRUE(b);
+        b = has_data_interface<decltype(v3)>::value;
+        EXPECT_FALSE(b);
     }
 
-    TEST(utils, norm_traits)
+    TEST(utils, has_strides)
     {
-        EXPECT_TRUE((std::is_same<norm_type_t<uint8_t>, int>::value));
-        EXPECT_TRUE((std::is_same<norm_type_t<int>, int>::value));
-        EXPECT_TRUE((std::is_same<norm_type_t<double>, double>::value));
-        EXPECT_TRUE((std::is_same<norm_type_t<std::vector<uint8_t>>, double>::value));
-        EXPECT_TRUE((std::is_same<norm_type_t<std::vector<int>>, double>::value));
-        EXPECT_TRUE((std::is_same<norm_type_t<std::vector<double>>, double>::value));
-        EXPECT_TRUE((std::is_same<norm_type_t<std::vector<long double>>, long double>::value));
+        bool b = has_strides<xarray<int>>::value;
+        EXPECT_TRUE(b);
+        b = has_strides<const xarray<int>>::value;
+        EXPECT_TRUE(b);
+        b = has_strides<const xtensor<double, 2>>::value;
+        EXPECT_TRUE(b);
+        b = has_strides<const xtensor_fixed<double, xshape<3, 4>>>::value;
+        EXPECT_TRUE(b);
 
-        EXPECT_TRUE((std::is_same<squared_norm_type_t<uint8_t>, int>::value));
-        EXPECT_TRUE((std::is_same<squared_norm_type_t<int>, int>::value));
-        EXPECT_TRUE((std::is_same<squared_norm_type_t<double>, double>::value));
-        EXPECT_TRUE((std::is_same<squared_norm_type_t<std::vector<uint8_t>>, uint64_t>::value));
-        EXPECT_TRUE((std::is_same<squared_norm_type_t<std::vector<int>>, uint64_t>::value));
-        EXPECT_TRUE((std::is_same<squared_norm_type_t<std::vector<double>>, double>::value));
-        EXPECT_TRUE((std::is_same<squared_norm_type_t<std::vector<long double>>, long double>::value));
+        xarray<int> a = xarray<int>::from_shape({3, 4, 5});
+        auto f = a + a - 23;
+        auto v2 = strided_view(a, {all(), 1, all()});
+        auto vv2 = strided_view(v2, {all(), 2});
+        auto v3 = strided_view(f, {all(), 2});
+
+        b = has_strides<decltype(v2)>::value;
+        EXPECT_TRUE(b);
+        b = has_strides<decltype(vv2)>::value;
+        EXPECT_TRUE(b);
+
+#ifndef _MSC_VER
+        // TODO fix this test for MSVC 2015!
+        b = has_strides<decltype(v3)>::value;
+        EXPECT_TRUE(b);
+#endif
+    }
+
+    TEST(utils, has_simd_interface)
+    {
+        bool b = has_simd_interface<xarray<int>>::value;
+
+        EXPECT_TRUE(b);
+        b = has_simd_interface<const xarray<int>>::value;
+        EXPECT_TRUE(b);
+        b = has_simd_interface<const xtensor<double, 2>>::value;
+        EXPECT_TRUE(b);
+        b = has_simd_interface<const xtensor_fixed<double, xshape<3, 4>>>::value;
+        EXPECT_TRUE(b);
+
+        xarray<int> a = xarray<int>::from_shape({3, 4, 5});
+        auto f = a + a - 23;
+        auto v2 = strided_view(a, {all(), 1, all()});
+        auto vv2 = strided_view(v2, {all(), 2});
+        auto v3 = strided_view(f, {all(), 2});
+
+        b = has_simd_interface<decltype(v2)>::value;
+        EXPECT_FALSE(b);
+        b = has_simd_interface<decltype(vv2)>::value;
+        EXPECT_FALSE(b);
+        b = has_simd_interface<decltype(v3)>::value;
+        EXPECT_FALSE(b);
+
+        auto xv = xt::view(a, 1);
+        b = has_simd_interface<decltype(xv)>::value;
+        EXPECT_TRUE(b);
+    }
+
+    TEST(utils, allocation_tracking)
+    {
+        using arr_t = xarray<double, layout_type::row_major,
+                             tracking_allocator<double, std::allocator<double>, alloc_tracking::policy::assert>>;
+
+        arr_t a = {{1,2,3}, {5,6,7}};
+
+        alloc_tracking::enable();
+        XT_EXPECT_THROW(arr_t b = a + 123, std::runtime_error);
+        XT_EXPECT_NO_THROW(a.resize({2, 3}));
+        XT_EXPECT_NO_THROW(a.resize({3, 2}));
+        XT_EXPECT_THROW(a.resize({3, 15}), std::runtime_error);
+        alloc_tracking::disable();
+        XT_EXPECT_NO_THROW(arr_t c = a);
+    }
+
+    TEST(utils, static_dimension)
+    {
+        std::ptrdiff_t sdim = static_dimension<std::vector<int>>::value;
+        EXPECT_EQ(sdim, -1);
+        sdim = static_dimension<std::array<int, 4>>::value;
+        EXPECT_EQ(sdim, 4);
+        sdim = static_dimension<xt::const_array<char, 12>>::value;
+        EXPECT_EQ(sdim, 12);
+        sdim = static_dimension<xt::fixed_shape<4, 1, 2, 3>>::value;
+        EXPECT_EQ(sdim, 4);
+        sdim = static_dimension<xt::sequence_view<std::array<std::ptrdiff_t, 2>, 1, 2>>::value;
+        EXPECT_EQ(sdim, 1);
+        sdim = static_dimension<xt::sequence_view<std::array<std::ptrdiff_t, 2>, 1, -1>>::value;
+        EXPECT_EQ(sdim, -1);
+        sdim = static_dimension<xt::sequence_view<xt::fixed_shape<4, 1, 2, 3>, 1, 4>>::value;
+        EXPECT_EQ(sdim, 3);
     }
 }

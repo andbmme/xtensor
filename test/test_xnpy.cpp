@@ -1,5 +1,6 @@
 /***************************************************************************
-* Copyright (c) 2016, Johan Mabille, Sylvain Corlay and Wolf Vollprecht    *
+* Copyright (c) Johan Mabille, Sylvain Corlay and Wolf Vollprecht          *
+* Copyright (c) QuantStack                                                 *
 *                                                                          *
 * Distributed under the terms of the BSD 3-Clause License.                 *
 *                                                                          *
@@ -38,14 +39,31 @@ namespace xt
                               { 1, 1, 1},
                               { 0, 0, 0}}};
 
+        xarray<int> iarr1d = {3, 4, 5, 6, 7};
+
         auto darr_loaded = load_npy<double>("files/xnpy_files/double.npy");
         EXPECT_TRUE(all(isclose(darr, darr_loaded)));
+
+        std::ifstream dstream("files/xnpy_files/double.npy");
+        auto darr_loaded_stream = load_npy<double>(dstream);
+        EXPECT_TRUE(all(isclose(darr, darr_loaded_stream)))
+            << "Loading double numpy array from stream failed";
+        dstream.close();
 
         auto barr_loaded = load_npy<bool>("files/xnpy_files/bool.npy");
         EXPECT_TRUE(all(equal(barr, barr_loaded)));
 
+        std::ifstream bstream("files/xnpy_files/bool.npy");
+        auto barr_loaded_stream = load_npy<bool>(bstream);
+        EXPECT_TRUE(all(equal(barr, barr_loaded_stream)))
+            << "Loading boolean numpy array from stream failed";
+        bstream.close();
+
         auto dfarr_loaded = load_npy<double, layout_type::column_major>("files/xnpy_files/double_fortran.npy");
         EXPECT_TRUE(all(isclose(darr, dfarr_loaded)));
+
+        auto iarr1d_loaded = load_npy<int>("files/xnpy_files/int.npy");
+        EXPECT_TRUE(all(equal(iarr1d, iarr1d_loaded)));
     }
 
     bool compare_binary_files(std::string fn1, std::string fn2)
@@ -61,16 +79,20 @@ namespace xt
             fn1_contents.size() == fn2_contents.size();
     }
 
-    std::string get_filename()
+    std::string get_filename(int n)
     {
-        std::string filename = std::tmpnam(nullptr);
-        filename += ".npy";
+        std::string filename = "files/xnpy_files/test_dump_" + std::to_string(n) + ".npy";
         return filename;
+    }
+
+    std::string read_file(const std::string& name)
+    {
+        return static_cast<std::stringstream const&>(std::stringstream() << std::ifstream(name).rdbuf()).str();
     }
 
     TEST(xnpy, dump)
     {
-        std::string filename = get_filename();
+        std::string filename = get_filename(0);
         xarray<bool> barr = {{{0, 0, 1},
                               {1, 1, 0},
                               {1, 0, 1}},
@@ -91,9 +113,14 @@ namespace xt
         }
 
         EXPECT_TRUE(compare_binary_files(filename, compare_name));
+
+        std::string barr_str = dump_npy(barr);
+        std::string barr_disk = read_file(compare_name);
+        EXPECT_EQ(barr_str, barr_disk) << "Dumping boolean numpy file to string failed";
+
         std::remove(filename.c_str());
 
-        filename = get_filename();
+        filename = get_filename(1);
         dump_npy(filename, ularr);
         auto ularrcpy = load_npy<uint64_t>(filename);
         EXPECT_TRUE(all(equal(ularr, ularrcpy)));
@@ -105,6 +132,20 @@ namespace xt
         }
 
         EXPECT_TRUE(compare_binary_files(filename, compare_name));
+
+        std::string ularr_str = dump_npy(ularr);
+        std::string ularr_disk = read_file(compare_name);
+        EXPECT_EQ(ularr_str, ularr_disk) << "Dumping boolean numpy file to string failed";
+
         std::remove(filename.c_str());
+    }
+
+    TEST(xnpy, xfunction_cast)
+    {
+        // compilation test, cf: https://github.com/xtensor-stack/xtensor/issues/1070
+        auto dc = cast<char>(load_npy<double>("files/xnpy_files/double.npy"));
+        EXPECT_EQ(dc(0, 0), 0);
+        xarray<char> adc = dc;
+        EXPECT_EQ(adc(0, 0), 0);
     }
 }

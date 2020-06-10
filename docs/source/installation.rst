@@ -21,9 +21,12 @@
 Installation
 ============
 
-Although ``xtensor`` is a header-only library, we provide standardized means to install it, with package managers or with cmake.
+Although ``xtensor`` is a header-only library, we provide standardized means to
+install it, with package managers or with cmake.
 
-Besides the xtendor headers, all these methods place the `cmake` project configuration file in the right location so that third-party projects can use cmake's find_package to locate xtensor headers.
+Besides the xtensor headers, all these methods place the ``cmake`` project
+configuration file in the right location so that third-party projects can use
+cmake's ``find_package`` to locate xtensor headers.
 
 .. image:: conda.svg
 
@@ -47,20 +50,32 @@ A package for xtensor is available on Debian.
 
     sudo apt-get install xtensor-dev
 
-.. image:: cmake.svg
+.. image:: spack.svg
 
+Using the Spack package
+-----------------------
+
+A package for xtensor is available on the Spack package manager.
+
+.. code::
+
+    spack install xtensor
+    spack load --dependencies xtensor
+
+.. image:: cmake.svg
 
 From source with cmake
 ----------------------
 
-You can also install ``xtensor`` from source with cmake. This requires that you have the xtl_ library installed on your system.
-On Unix platforms, from the source directory:
+You can also install ``xtensor`` from source with cmake. This requires that you
+have the xtl_ library installed on your system. On Unix platforms, from the
+source directory:
 
 .. code::
 
     mkdir build
     cd build
-    cmake -DCMAKE_INSTALL_PREFIX=/path/to/prefix ..
+    cmake -DCMAKE_INSTALL_PREFIX=path_to_prefix ..
     make install
 
 On Windows platforms, from the source directory:
@@ -69,10 +84,36 @@ On Windows platforms, from the source directory:
 
     mkdir build
     cd build
-    cmake -G "NMake Makefiles" -DCMAKE_INSTALL_PREFIX=/path/to/prefix ..
+    cmake -G "NMake Makefiles" -DCMAKE_INSTALL_PREFIX=path_to_prefix ..
     nmake
     nmake install
 
-See the section of the documentation on :doc:`build-options`, for more details on how to cmake options.
+``path_to_prefix`` is the absolute path to the folder where cmake searches for
+dependencies and installs libraries. ``xtensor`` installation from cmake assumes
+this folder contains ``include`` and ``lib`` subfolders.
 
-.. _xtl: https://github.com/QuantStack/xtl
+See the :doc:`build-options` section for more details about cmake options.
+
+Although not officially supported, ``xtensor`` can be installed with MinGW:
+
+.. code::
+
+    mkdir build
+    cd build
+    cmake -G "MinGW Makefiles" -DCMAKE_INSTALL_PREFIX=path_to_prefix ..
+    mingw32-make
+    mingw32-make install
+
+Including xtensor in your project
+---------------------------------
+
+The different packages of ``xtensor`` are built with cmake, so whatever the
+installation mode you choose, you can add ``xtensor`` to your project using cmake:
+
+.. code::
+
+    find_package(xtensor REQUIRED)
+    target_include_directories(your_target PUBLIC ${xtensor_INCLUDE_DIRS})
+    target_link_libraries(your_target PUBLIC xtensor)
+
+.. _xtl: https://github.com/xtensor-stack/xtl

@@ -1,5 +1,6 @@
 /***************************************************************************
-* Copyright (c) 2016, Johan Mabille, Sylvain Corlay and Wolf Vollprecht    *
+* Copyright (c) Johan Mabille, Sylvain Corlay and Wolf Vollprecht          *
+* Copyright (c) QuantStack                                                 *
 *                                                                          *
 * Distributed under the terms of the BSD 3-Clause License.                 *
 *                                                                          *
@@ -23,19 +24,19 @@ namespace xt
     template <class F, class C>
     struct operation_tester
     {
-        using container_type = C;
+        using storage_type = C;
         using shape_type = typename C::shape_type;
 
-        container_type a;
-        container_type ra;
-        container_type ca;
-        container_type cta;
-        container_type ua;
+        storage_type a;
+        storage_type ra;
+        storage_type ca;
+        storage_type cta;
+        storage_type ua;
 
-        container_type res_rr;
-        container_type res_rc;
-        container_type res_rct;
-        container_type res_ru;
+        storage_type res_rr;
+        storage_type res_rc;
+        storage_type res_rct;
+        storage_type res_ru;
 
         operation_tester();
     };
@@ -45,27 +46,27 @@ namespace xt
     {
         F f;
         row_major_result<shape_type> rmr;
-        a.reshape(rmr.shape(), rmr.strides());
+        a.resize(rmr.shape(), rmr.strides());
         assign_array(a, rmr.m_assigner);
-        ra.reshape(rmr.shape(), rmr.strides());
+        ra.resize(rmr.shape(), rmr.strides());
         assign_array(ra, rmr.m_assigner);
 
         column_major_result<shape_type> cmr;
-        ca.reshape(cmr.shape(), cmr.strides());
+        ca.resize(cmr.shape(), cmr.strides());
         assign_array(ca, cmr.m_assigner);
 
         central_major_result<shape_type> ctmr;
-        cta.reshape(ctmr.shape(), ctmr.strides());
+        cta.resize(ctmr.shape(), ctmr.strides());
         assign_array(cta, ctmr.m_assigner);
 
         unit_shape_result<shape_type> usr;
-        ua.reshape(usr.shape(), usr.strides());
+        ua.resize(usr.shape(), usr.strides());
         assign_array(ua, usr.m_assigner);
 
-        res_rr.reshape(rmr.shape(), rmr.strides());
-        res_rc.reshape(rmr.shape(), rmr.strides());
-        res_rct.reshape(rmr.shape(), rmr.strides());
-        res_ru.reshape(rmr.shape(), rmr.strides());
+        res_rr.resize(rmr.shape(), rmr.strides());
+        res_rc.resize(rmr.shape(), rmr.strides());
+        res_rct.resize(rmr.shape(), rmr.strides());
+        res_ru.resize(rmr.shape(), rmr.strides());
 
         for (size_t i = 0; i < rmr.shape()[0]; ++i)
         {
@@ -85,19 +86,19 @@ namespace xt
     template <class F, class C>
     struct scalar_operation_tester
     {
-        using container_type = C;
+        using storage_type = C;
         using shape_type = typename C::shape_type;
 
         int b;
-        container_type ra;
-        container_type ca;
-        container_type cta;
-        container_type ua;
+        storage_type ra;
+        storage_type ca;
+        storage_type cta;
+        storage_type ua;
 
-        container_type res_r;
-        container_type res_c;
-        container_type res_ct;
-        container_type res_u;
+        storage_type res_r;
+        storage_type res_c;
+        storage_type res_ct;
+        storage_type res_u;
 
         scalar_operation_tester();
     };
@@ -108,25 +109,25 @@ namespace xt
         F f;
         b = 2;
         row_major_result<shape_type> rmr;
-        ra.reshape(rmr.shape(), rmr.strides());
+        ra.resize(rmr.shape(), rmr.strides());
         assign_array(ra, rmr.m_assigner);
 
         column_major_result<shape_type> cmr;
-        ca.reshape(cmr.shape(), cmr.strides());
+        ca.resize(cmr.shape(), cmr.strides());
         assign_array(ca, cmr.m_assigner);
 
         central_major_result<shape_type> ctmr;
-        cta.reshape(ctmr.shape(), ctmr.strides());
+        cta.resize(ctmr.shape(), ctmr.strides());
         assign_array(cta, ctmr.m_assigner);
 
         unit_shape_result<shape_type> usr;
-        ua.reshape(usr.shape(), usr.strides());
+        ua.resize(usr.shape(), usr.strides());
         assign_array(ua, usr.m_assigner);
 
-        res_r.reshape(rmr.shape(), rmr.strides());
-        res_c.reshape(cmr.shape(), cmr.strides());
-        res_ct.reshape(ctmr.shape(), ctmr.strides());
-        res_u.reshape(usr.shape(), usr.strides());
+        res_r.resize(rmr.shape(), rmr.strides());
+        res_c.resize(cmr.shape(), cmr.strides());
+        res_ct.resize(ctmr.shape(), ctmr.strides());
+        res_u.resize(usr.shape(), usr.strides());
 
         for (size_t i = 0; i < rmr.shape()[0]; ++i)
         {

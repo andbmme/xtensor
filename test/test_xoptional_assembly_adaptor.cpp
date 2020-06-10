@@ -1,5 +1,6 @@
 /***************************************************************************
-* Copyright (c) 2016, Johan Mabille, Sylvain Corlay and Wolf Vollprecht    *
+* Copyright (c) Johan Mabille, Sylvain Corlay and Wolf Vollprecht          *
+* Copyright (c) QuantStack                                                 *
 *                                                                          *
 * Distributed under the terms of the BSD 3-Clause License.                 *
 *                                                                          *
@@ -38,8 +39,8 @@ namespace xt
             SCOPED_TRACE("copy constructor");
             adaptor_type b(a);
             compare_shape(a, b);
-            EXPECT_EQ(a.value().data(), b.value().data());
-            EXPECT_EQ(a.has_value().data(), b.has_value().data());
+            EXPECT_EQ(a.value().storage(), b.value().storage());
+            EXPECT_EQ(a.has_value().storage(), b.has_value().storage());
         }
 
         {
@@ -47,12 +48,12 @@ namespace xt
             array_type v2 = {{1, 2, 13}, {14, 15, 16}};
             flag_array_type hv2 = {{false, true, true}, {false, true, false}};
             adaptor_type c(v2, hv2);
-            EXPECT_NE(a.value().data(), c.value().data());
-            EXPECT_NE(a.has_value().data(), c.has_value().data());
+            EXPECT_NE(a.value().storage(), c.value().storage());
+            EXPECT_NE(a.has_value().storage(), c.has_value().storage());
             c = a;
             compare_shape(a, c);
-            EXPECT_EQ(a.value().data(), c.value().data());
-            EXPECT_EQ(a.has_value().data(), c.has_value().data());
+            EXPECT_EQ(a.value().storage(), c.value().storage());
+            EXPECT_EQ(a.has_value().storage(), c.has_value().storage());
         }
     }
 
@@ -67,8 +68,8 @@ namespace xt
             adaptor_type tmp(a);
             adaptor_type b(std::move(tmp));
             compare_shape(a, b);
-            EXPECT_EQ(a.value().data(), b.value().data());
-            EXPECT_EQ(a.has_value().data(), b.has_value().data());
+            EXPECT_EQ(a.value().storage(), b.value().storage());
+            EXPECT_EQ(a.has_value().storage(), b.has_value().storage());
         }
 
         {
@@ -76,14 +77,23 @@ namespace xt
             array_type v2 = {{1, 2, 13}, {14, 15, 16}};
             flag_array_type hv2 = {{false, true, true}, {false, true, false}};
             adaptor_type c(v2, hv2);
-            EXPECT_NE(a.value().data(), c.value().data());
-            EXPECT_NE(a.has_value().data(), c.has_value().data());
+            EXPECT_NE(a.value().storage(), c.value().storage());
+            EXPECT_NE(a.has_value().storage(), c.has_value().storage());
             adaptor_type tmp(a);
             c = std::move(tmp);
             compare_shape(a, c);
-            EXPECT_EQ(a.value().data(), c.value().data());
-            EXPECT_EQ(a.has_value().data(), c.has_value().data());
+            EXPECT_EQ(a.value().storage(), c.value().storage());
+            EXPECT_EQ(a.has_value().storage(), c.has_value().storage());
         }
+    }
+
+    TEST(xoptional_assembly_adaptor, resize)
+    {
+        array_type v = {{1, 2, 3}, {4, 5, 6}};
+        flag_array_type hv = {{true, false, true}, {false, true, false}};
+        adaptor_type a(v, hv);
+        test_resize(a);
+        compare_shape(a.value(), a.has_value());
     }
 
     TEST(xoptional_assembly_adaptor, reshape)
@@ -191,12 +201,12 @@ namespace xt
         {
             SCOPED_TRACE("incompatible shapes");
             shape_type s4 = {2, 1, 3, 2};
-            EXPECT_THROW(a.broadcast_shape(s4), broadcast_error);
+            XT_EXPECT_THROW(a.broadcast_shape(s4), broadcast_error);
         }
 
         {
             shape_type s2 = {3, 1, 4, 2};
-            a.reshape(s2);
+            a.resize(s2);
             SCOPED_TRACE("different dimensions");
             shape_type s3 = {5, 3, 1, 4, 2};
             shape_type s3r = s3;
@@ -216,7 +226,7 @@ namespace xt
             xarray<int, layout_type::row_major> v;
             xarray<bool, layout_type::row_major> hv;
             xoptional_assembly_adaptor<decltype(v)&, decltype(hv)&> rma(v, hv);
-            rma.reshape({2, 2});
+            rma.resize({2, 2});
             std::copy(vec.cbegin(), vec.cend(), rma.begin<layout_type::row_major>());
             EXPECT_EQ(vec[0], rma(0, 0));
             EXPECT_EQ(vec[1], rma(0, 1));
@@ -230,7 +240,7 @@ namespace xt
             xarray<int, layout_type::row_major> v;
             xarray<bool, layout_type::row_major> hv;
             xoptional_assembly_adaptor<decltype(v)&, decltype(hv)&> cma(v, hv);
-            cma.reshape({2, 2});
+            cma.resize({2, 2});
             std::copy(vec.cbegin(), vec.cend(), cma.begin<layout_type::column_major>());
             EXPECT_EQ(vec[0], cma(0, 0));
             EXPECT_EQ(vec[1], cma(1, 0));
@@ -244,7 +254,8 @@ namespace xt
     {
         row_major_result<> rm;
         array_type a;
-        a.reshape(rm.m_shape, layout_type::row_major);
+        a.resize(rm.m_shape, layout_type::row_major);
+        a.fill(0);
         a(1, 1, 0) = rm.m_assigner[1][1][0];
         a[0] = 4;
         flag_array_type fa(rm.m_shape, true);
@@ -260,7 +271,7 @@ namespace xt
             {
                 ++iter;
             }
-            EXPECT_EQ(vec.value().data()[nb_iter], *iter);
+            EXPECT_EQ(vec.value().storage()[nb_iter], *iter);
             for (size_t i = 0; i < nb_iter; ++i)
             {
                 ++iter;
@@ -273,8 +284,8 @@ namespace xt
             shape_type shape(rm.m_shape.size() + 1);
             std::copy(rm.m_shape.begin(), rm.m_shape.end(), shape.begin() + 1);
             shape[0] = 2;
-            auto iter = vec.begin<shape_type, layout_type::row_major>(shape);
-            auto iter_end = vec.end<shape_type, layout_type::row_major>(shape);
+            auto iter = vec.begin<layout_type::row_major>(shape);
+            auto iter_end = vec.end<layout_type::row_major>(shape);
             for (size_t i = 0; i < 2 * nb_iter; ++i)
             {
                 ++iter;
@@ -308,8 +319,8 @@ namespace xt
             shape_type shape(rm.m_shape.size() + 1);
             std::copy(rm.m_shape.begin(), rm.m_shape.end(), shape.begin() + 1);
             shape[0] = 2;
-            auto iter = vec.begin<shape_type, layout_type::column_major>(shape);
-            auto iter_end = vec.end<shape_type, layout_type::column_major>(shape);
+            auto iter = vec.begin<layout_type::column_major>(shape);
+            auto iter_end = vec.end<layout_type::column_major>(shape);
             for (size_t i = 0; i < 2 * nb_iter; ++i)
             {
                 ++iter;
@@ -327,7 +338,7 @@ namespace xt
     {
         row_major_result<> rm;
         array_type a;
-        a.reshape(rm.m_shape, layout_type::row_major);
+        a.resize(rm.m_shape, layout_type::row_major);
         a(1, 0, 3) = rm.m_assigner[1][0][3];
         a(2, 1, 3) = 2;
         flag_array_type fa(rm.m_shape, true);
@@ -343,7 +354,7 @@ namespace xt
             {
                 ++iter;
             }
-            EXPECT_EQ(vec.value().data()[nb_iter - 1], *iter);
+            EXPECT_EQ(vec.value().storage()[nb_iter - 1], *iter);
             for (size_t i = 0; i < nb_iter; ++i)
             {
                 ++iter;
@@ -356,13 +367,13 @@ namespace xt
             shape_type shape(rm.m_shape.size() + 1);
             std::copy(rm.m_shape.begin(), rm.m_shape.end(), shape.begin() + 1);
             shape[0] = 2;
-            auto iter = vec.rbegin<shape_type, layout_type::row_major>(shape);
-            auto iter_end = vec.rend<shape_type, layout_type::row_major>(shape);
+            auto iter = vec.rbegin<layout_type::row_major>(shape);
+            auto iter_end = vec.rend<layout_type::row_major>(shape);
             for (size_t i = 0; i < 2 * nb_iter; ++i)
             {
                 ++iter;
             }
-            EXPECT_EQ(vec.value().data()[2 * nb_iter - 1], *iter);
+            EXPECT_EQ(vec.value().storage()[2 * nb_iter - 1], *iter);
             for (size_t i = 0; i < 2 * nb_iter; ++i)
             {
                 ++iter;

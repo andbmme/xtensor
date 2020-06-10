@@ -1,5 +1,6 @@
 /***************************************************************************
-* Copyright (c) 2016, Johan Mabille, Sylvain Corlay and Wolf Vollprecht    *
+* Copyright (c) Johan Mabille, Sylvain Corlay and Wolf Vollprecht          *
+* Copyright (c) QuantStack                                                 *
 *                                                                          *
 * Distributed under the terms of the BSD 3-Clause License.                 *
 *                                                                          *
@@ -7,6 +8,7 @@
 ****************************************************************************/
 
 #include "gtest/gtest.h"
+#include "test_common_macros.hpp"
 #include "xtensor/xscalar.hpp"
 #include "xtensor/xarray.hpp"
 
@@ -17,6 +19,21 @@ namespace xt
         // The shape of a 0-D xarray is ().  The size of the buffer is 1.
         xscalar<int> x(1);
         EXPECT_EQ(x.size(), size_t(1));
+    }
+
+    TEST(xscalar, construct_convert)
+    {
+        xscalar<int> a, b, c;
+        b = 123;
+        c = 3;
+
+        int bc = b;
+        int ac = a;
+        int abc = a + b;
+        EXPECT_EQ(b(), 123);
+        EXPECT_EQ(bc, 123);
+        EXPECT_EQ(ac, 0);
+        EXPECT_EQ(abc, 123);
     }
 
     TEST(xscalar, access)
@@ -42,7 +59,7 @@ namespace xt
     TEST(xscalar, at)
     {
         xscalar<int> x(2);
-        EXPECT_ANY_THROW(x.at(0));
+        XT_EXPECT_ANY_THROW(x.at(0));
     }
 
     TEST(xscalar, dimension)
@@ -68,6 +85,15 @@ namespace xt
         auto iter_end = x.end();
         ++iter;
         EXPECT_EQ(iter, iter_end);
+    }
+
+
+    TEST(xscalar, stepper)
+    {
+        xarray<double> ref = zeros<double>({4, 6});
+        xarray<int> a{0, 1};
+        ref[a + 1] = 1;
+        EXPECT_EQ(ref(1, 2), 1);
     }
 
     TEST(xscalar, dummy_iterator)

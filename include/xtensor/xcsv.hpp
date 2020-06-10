@@ -1,5 +1,6 @@
 /***************************************************************************
-* Copyright (c) 2016, Johan Mabille, Sylvain Corlay and Wolf Vollprecht    *
+* Copyright (c) Johan Mabille, Sylvain Corlay and Wolf Vollprecht          *
+* Copyright (c) QuantStack                                                 *
 *                                                                          *
 * Distributed under the terms of the BSD 3-Clause License.                 *
 *                                                                          *
@@ -17,6 +18,7 @@
 #include <utility>
 
 #include "xtensor.hpp"
+#include "xtensor_config.hpp"
 
 namespace xt
 {
@@ -26,7 +28,10 @@ namespace xt
      **************************************/
 
     template <class T, class A = std::allocator<T>>
-    xtensor_container<std::vector<T, A>, 2> load_csv(std::istream& stream);
+    using xcsv_tensor = xtensor_container<std::vector<T, A>, 2, layout_type::row_major>;
+
+    template <class T, class A = std::allocator<T>>
+    xcsv_tensor<T, A> load_csv(std::istream& stream, const char delimiter = ',', const std::size_t skip_rows = 0, const std::ptrdiff_t max_rows = -1, const std::string comments = "#");
 
     template <class E>
     void dump_csv(std::ostream& stream, const xexpression<E>& e);
@@ -44,6 +49,17 @@ namespace xt
             std::istringstream iss(cell);
             iss >> res;
             return res;
+        }
+
+        template <>
+        inline std::string lexical_cast(const std::string& cell)
+        {
+            size_t first = cell.find_first_not_of(' ');
+            if (first == std::string::npos)
+                return cell;
+
+            size_t last = cell.find_last_not_of(' ');
+            return cell.substr(first, last==std::string::npos?cell.size():last+1);
         }
 
         template <>
@@ -74,10 +90,10 @@ namespace xt
         inline unsigned long long lexical_cast<unsigned long long>(const std::string& cell) { return std::stoull(cell); }
 
         template <class ST, class T, class OI>
-        ST load_csv_row(std::istream& row_stream, OI output, std::string cell)
+        ST load_csv_row(std::istream& row_stream, OI output, std::string cell, const char delimiter = ',')
         {
             ST length = 0;
-            while (std::getline(row_stream, cell, ','))
+            while (std::getline(row_stream, cell, delimiter))
             {
                 *output++ = lexical_cast<T>(cell);
                 ++length;
@@ -91,26 +107,47 @@ namespace xt
      * 
      * Returns an \ref xexpression for the parsed CSV
      * @param stream the input stream containing the CSV encoded values
+     * @param delimiter the character used to separate values. [default: ',']
+     * @param skip_rows the number of lines to skip from the beginning. [default: 0]
+     * @param max_rows the number of lines to read after skip_rows lines; the default is to read all the lines. [default: -1]
+     * @param comments the string used to indicate the start of a comment. [default: "#"]
      */
     template <class T, class A>
-    xtensor_container<std::vector<T, A>, 2> load_csv(std::istream& stream)
+    xcsv_tensor<T, A> load_csv(std::istream& stream,
+                               const char delimiter,
+                               const std::size_t skip_rows,
+                               const std::ptrdiff_t max_rows,
+                               const std::string comments)
     {
-        using container_type = typename std::vector<T, A>;
-        using tensor_type = xtensor_container<container_type, 2>;
+        using tensor_type = xcsv_tensor<T, A>;
+        using storage_type = typename tensor_type::storage_type;
         using size_type = typename tensor_type::size_type;
         using inner_shape_type = typename tensor_type::inner_shape_type;
         using inner_strides_type = typename tensor_type::inner_strides_type;
-        using output_iterator = std::back_insert_iterator<container_type>;
+        using output_iterator = std::back_insert_iterator<storage_type>;
 
-        container_type data;
-        size_type nbrow = 0, nbcol = 0;
+        storage_type data;
+        size_type nbrow = 0, nbcol = 0, nhead = 0;
         {
             output_iterator output(data);
             std::string row, cell;
             while (std::getline(stream, row))
             {
+                if (nhead < skip_rows) 
+                {
+                    ++nhead;
+                    continue;
+                }
+                if (std::equal(comments.begin(), comments.end(), row.begin()))
+                {
+                    continue;
+                }
+                if (0 < max_rows && max_rows <= static_cast<const long long>(nbrow))
+                {
+                    break;
+                }
                 std::stringstream row_stream(row);
-                nbcol = detail::load_csv_row<size_type, T, output_iterator>(row_stream, output, cell);
+                nbcol = detail::load_csv_row<size_type, T, output_iterator>(row_stream, output, cell, delimiter);
                 ++nbrow;
             }
         }
@@ -120,7 +157,7 @@ namespace xt
         // Sanity check for data size.
         if (data.size() != data_size)
         {
-            throw std::runtime_error("Inconsistent row lengths in CSV");
+            XTENSOR_THROW(std::runtime_error, "Inconsistent row lengths in CSV");
         }
         return tensor_type(std::move(data), std::move(shape), std::move(strides));
     }
@@ -138,7 +175,7 @@ namespace xt
         const E& ex = e.derived_cast();
         if (ex.dimension() != 2)
         {
-            throw std::runtime_error("Only 2-D expressions can be serialized to CSV");
+            XTENSOR_THROW(std::runtime_error, "Only 2-D expressions can be serialized to CSV");
         }
         size_type nbrows = ex.shape()[0], nbcols = ex.shape()[1];
         auto st = ex.stepper_begin(ex.shape());

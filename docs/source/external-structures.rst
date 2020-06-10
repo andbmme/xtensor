@@ -15,8 +15,7 @@ Adapting one-dimensional containers
 
 You may want to use your own one-dimensional container as a backend for tensor data containers
 and even for the shape or the strides. This is the simplest structure to plug into ``xtensor``.
-In the following example, we define new container and adaptor types for user-specified storage and
-shape types.
+In the following example, we define new container and adaptor types for user-specified storage and shape types.
 
 .. code::
 
@@ -33,13 +32,12 @@ These new types will have all the features of the core ``xt::xtensor`` and ``xt:
 ``xt::xarray_adaptor`` and ``xt::xtensor_adaptor`` hold a reference on an already initialized
 container.
 
-A requirement for the user-specified containers is to provide a minimal ``std::vector``-like interface,
-that is:
+A requirement for the user-specified containers is to provide a minimal ``std::vector``-like interface, that is:
 
 - usual typedefs for STL sequences
 - random access methods (``operator[]``, ``front``, ``back`` and ``data``)
 - iterator methods (``begin``, ``end``, ``cbegin``, ``cend``)
-- ``size`` and ``resize`` methods
+- ``size`` and ``reshape``, ``resize`` methods
 
 ``xtensor`` does not require that the container has a contiguous memory layout, only that it
 provides the aforementioned interface. In fact, the container could even be backed by a
@@ -66,6 +64,10 @@ with the following simple example:
         static constexpr layout_type layout = layout_type::dynamic;
     };
 
+    // This is the adaptor we need to define to plug raw_tensor in xtensor
+    template <class T>
+    class raw_tensor_adaptor;
+
 Define inner types
 ~~~~~~~~~~~~~~~~~~
 
@@ -74,7 +76,7 @@ The following tells ``xtensor`` which types must be used for getting shape, stri
 .. code::
 
     template <class T>
-    struct xcontainer_inner_types<raw_tensor<T>>
+    struct xcontainer_inner_types<raw_tensor_adaptor<T>>
     {
         using container_type = typename raw_tensor<T>::container_type;
         using inner_shape_type = typename raw_tensor<T>::shape_type;
@@ -86,7 +88,7 @@ The following tells ``xtensor`` which types must be used for getting shape, stri
         static constexpr layout_type layout = raw_tensor<T>::layout;
     };
 
-The ``inner_XXX_type`` are the types used to store and read the shape, strides an backstrides, while the
+The ``inner_XXX_type`` are the types used to store and read the shape, strides and backstrides, while the
 other ones are used for reshaping. Most of the time, they will be the same; differences come when inner
 types cannot be instantiated out of the box (because they are linked to python buffer for instance).
 
@@ -95,8 +97,8 @@ Next, bring all the iterable features with this simple definition:
 .. code::
 
     template <class T>
-    struct xiterable_inner_types<raw_tensor<T>>
-        : xcontainer_iterable_types<raw_tensor<T>>
+    struct xiterable_inner_types<raw_tensor_adaptor<T>>
+        : xcontainer_iterable_types<raw_tensor_adaptor<T>>
     {
     };
 
@@ -114,9 +116,9 @@ Next step is to inherit from the ``xcontainer`` and the ``xcontainer_semantic`` 
         ...
     };
 
-Thanks to the previous structures definition, inheriting from ``xcontainer`` brings almost all the container
-API available in the other entities of ``xtensor``, while  inheriting from ``xtensor_semantic`` brings the
-support for mathematical operations.
+Thanks to definition of the previous structures, inheriting from ``xcontainer`` brings almost all the container
+API available in the other entities of ``xtensor``, while  inheriting from ``xtensor_semantic`` brings the support
+for mathematical operations.
 
 Define semantic
 ~~~~~~~~~~~~~~~
@@ -160,35 +162,34 @@ they are declared as ``protected`` in the base class.
         }
     };
     
-The last two methods are extended copy constructor and assign operator. They allow to write things like
+The last two methods are extended copy constructor and assign operator. They allow writing things like
 
 .. code::
 
     using tensor_type = raw_tensor_adaptor<double>;
     tensor_type a, b, c;
     // .... init a, b and c
-    tnesor_type d = a + b - c;
+    tensor_type d = a + b - c;
 
-Implement the reshape methods
+Implement the resize methods
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The next methods to define are the overloads of ``reshape``. ``xtensor`` provides utilities functions to
-compute strides based on the shape and the layout, so the implementation of the ``reshape`` overloads
-is straightforward:
+The next methods to define are the overloads of ``resize``. ``xtensor`` provides utility functions to compute
+strides based on the shape and the layout, so the implementation of the ``resize`` overloads is straightforward:
 
 .. code::
 
-    #include "xtensor/xstrides.hpp" // for utitilities functions
+    #include "xtensor/xstrides.hpp" // for utility functions
 
     template <class T>
-    void reshape(const shape_type& shape)
+    void resize(const shape_type& shape)
     {
         if(m_shape != shape)
-            reshape(shape, layout::row_major);
+            resize(shape, layout::row_major);
     }
 
     template <class T>
-    void reshape(const shape_type& shape, layout l)
+    void resize(const shape_type& shape, layout l)
     {
         m_raw.m_shape = shape;
         m_raw.m_strides.resize(shape.size());
@@ -198,7 +199,7 @@ is straightforward:
     }
 
     template <class T>
-    void reshape(const shape_type& shape, const strides_type& strides)
+    void resize(const shape_type& shape, const strides_type& strides)
     {
         m_raw.m_shape = shape;
         m_raw.m_strides = strides;
@@ -230,9 +231,8 @@ be declared as a friend class so that it can access them.
 Embedding a full tensor structure
 ---------------------------------
 
-You may need to plug structures that already provide n-dimensional access methods, instead
-of a one-dimensional container with a strided index scheme. This section illustrates how
-to adapt such structures with the following (minimal) API:
+You may need to plug structures that already provide n-dimensional access methods, instead of a one-dimensional
+container with a strided index scheme. This section illustrates how to adapt such structures with the following (minimal) API:
 
 .. code::
 
@@ -259,6 +259,10 @@ to adapt such structures with the following (minimal) API:
         const T& element(It first, It last) const;
     };
 
+    // This is the adaptor we need to define to plug table in xtensor
+    template <class T>
+    class table_adaptor;
+
 Define inner types
 ~~~~~~~~~~~~~~~~~~
 
@@ -267,13 +271,13 @@ The following definitions are required:
 .. code::
 
     template <class T>
-    struct xcontainer_inner_type<table<T>>
+    struct xcontainer_inner_type<table_adaptor<T>>
     {
-        using temporary_type = table<T>;
+        using temporary_type = xarray<T>;
     };
 
     template <class T>
-    struct xiterable_inner_types<table<T>>
+    struct xiterable_inner_types<table_adaptor<T>>
     {
         using inner_shape_type = typename table<T>::shape_type;
         using stepper = xindexed_stepper<table<T>, false>;
@@ -319,14 +323,14 @@ The iterator and stepper used here may not be the most optimal for ``table``, ho
 are guaranteed to work as long as ``table`` provides an access operator based on indices.
 
 NOTE: we inherit from ``xcontainer_semantic`` because we assume the ``table_adaptor`` class
-embeds an instance of ``table``. If it tooks a reference on it, we would inherit from
+embeds an instance of ``table``. If it took a reference on it, we would inherit from
 ``xadaptor_semantic`` instead.
 
 Define semantic
 ~~~~~~~~~~~~~~~
 
 As for one-dimensional containers adaptors, you must define constructors and at least declare
-default copy and move constuctor and assign operator. You also must define extended copy
+default copy and move constructors and assignment operators. You also must define the extended copy
 constructor and assign operator.
 
 .. code::
@@ -442,7 +446,7 @@ This part is relatively straightforward:
         return false;
     }
 
-Implement reshape overloads
+Implement resize overloads
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This is very similar to what must be done for one-dimensional containers,

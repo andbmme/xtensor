@@ -1,5 +1,6 @@
 /***************************************************************************
-* Copyright (c) 2016, Johan Mabille, Sylvain Corlay and Wolf Vollprecht    *
+* Copyright (c) Johan Mabille, Sylvain Corlay and Wolf Vollprecht          *
+* Copyright (c) QuantStack                                                 *
 *                                                                          *
 * Distributed under the terms of the BSD 3-Clause License.                 *
 *                                                                          *
@@ -18,12 +19,21 @@
 #include "xtensor/xio.hpp"
 #include "xtensor/xrandom.hpp"
 #include "xtensor/xbuilder.hpp"
+#include "xtensor/xdynamic_view.hpp"
 #include "xtensor/xview.hpp"
 
 #include "files/xio_expected_results.hpp"
 
 namespace xt
 {
+    TEST(xio, xarray_size_t)
+    {
+        xt::xarray<size_t> e = xt::arange<size_t>(5);
+        std::stringstream out;
+        out << e;
+        EXPECT_EQ("{0, 1, 2, 3, 4}", out.str());
+    }
+
     TEST(xio, xtensor_one_d)
     {
         xtensor<double, 1> e = xt::arange<double>(1, 6);
@@ -80,6 +90,17 @@ namespace xt
         EXPECT_EQ("{{1, 2, 3, 4}}", out_4.str());
     }
 
+    TEST(xio, xdynamic_view)
+    {
+        xarray<int> e{{1, 2, 3, 4},
+                      {5, 6, 7, 8},
+                      {9, 10, 11, 12}};
+        auto v = xt::dynamic_view(e, { 1, keep(0, 2, 3)});
+        std::stringstream out;
+        out << v;
+        EXPECT_EQ("{5, 7, 8}", out.str());
+    }
+
     TEST(xio, random_nan_inf)
     {
         xt::random::seed(123);
@@ -126,7 +147,8 @@ namespace xt
 
         std::stringstream out;
         out << (rn > 0);
-        EXPECT_EQ(bool_fn, out.str());
+        std::string res = bool_fn;
+        EXPECT_EQ(res, out.str());
     }
 
     TEST(xio, cutoff)
@@ -170,7 +192,7 @@ namespace xt
         xt::xarray<double, layout_type::row_major> rn = xt::random::rand<double>({100, 100}, -10, 10);
 
         xt::print_options::set_line_width(150);
-        xt::print_options::set_edgeitems(10);
+        xt::print_options::set_edge_items(10);
         xt::print_options::set_precision(10);
         xt::print_options::set_threshold(100);
 
@@ -180,9 +202,31 @@ namespace xt
 
         // reset back to default
         xt::print_options::set_line_width(75);
-        xt::print_options::set_edgeitems(3);
+        xt::print_options::set_edge_items(3);
         xt::print_options::set_precision(-1);
         xt::print_options::set_threshold(1000);
+    }
+
+    namespace po = xt::print_options;
+
+    TEST(xio, local_options)
+    {
+        xt::random::seed(123);
+        xt::xarray<double, layout_type::row_major> rn = xt::random::rand<double>({100, 100}, -10, 10);
+
+        std::stringstream out;
+        out << po::line_width(150)
+            << po::edge_items(10)
+            << po::precision(10)
+            << po::threshold(100)
+            << rn;
+
+        EXPECT_EQ(print_options_result, out.str());
+
+        EXPECT_EQ(out.iword(po::edge_items::id()), long(0));
+        EXPECT_EQ(out.iword(po::line_width::id()), long(0));
+        EXPECT_EQ(out.iword(po::threshold::id()), long(0));
+        EXPECT_EQ(out.iword(po::precision::id()), long(0));
     }
 
     TEST(xio, three_d)
@@ -264,5 +308,26 @@ namespace xt
         }, out);
 
         EXPECT_EQ(custom_formatter_result, out.str());
+    }
+
+    TEST(xio, view_on_broadcast)
+    {
+        auto on = xt::ones<int>({5, 5});
+        auto von = xt::view(on, 1);
+        std::stringstream out;
+        out << von;
+        std::string exp = "{1, 1, 1, 1, 1}";
+        EXPECT_EQ(exp, out.str());
+    }
+
+    TEST(xio, flags_reset)
+    {
+        xt::xarray<double> aod = {123400000., 123400000.};
+        std::stringstream out;
+        out << aod;
+        double d = 2.119;
+        out << '\n' << d;
+        std::string exp = "{ 1.234000e+08,  1.234000e+08}\n2.119";
+        EXPECT_EQ(exp, out.str());
     }
 }

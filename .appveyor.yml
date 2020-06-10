@@ -1,12 +1,15 @@
 build: false
 
+branches:
+  only:
+    - master
+
 platform:
   - x64
-  - x86
 
 image:
   - Visual Studio 2017
-  - Visual Studio 2015 
+  - Visual Studio 2015
 
 environment:
   matrix:
@@ -15,9 +18,8 @@ environment:
 init:
   - "ECHO %MINICONDA%"
   - if "%APPVEYOR_BUILD_WORKER_IMAGE%" == "Visual Studio 2015" set VCVARPATH="C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\vcvarsall.bat"
-  - if "%APPVEYOR_BUILD_WORKER_IMAGE%" == "Visual Studio 2015" set VCARGUMENT=%PLATFORM% 
-  - if "%APPVEYOR_BUILD_WORKER_IMAGE%" == "Visual Studio 2017" if "%PLATFORM%" == "x64" set VCVARPATH="C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\VC\Auxiliary\Build\vcvars64.bat"
-  - if "%APPVEYOR_BUILD_WORKER_IMAGE%" == "Visual Studio 2017" if "%PLATFORM%" == "x86" set VCVARPATH="C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\VC\Auxiliary\Build\vcvars32.bat"
+  - if "%APPVEYOR_BUILD_WORKER_IMAGE%" == "Visual Studio 2015" set VCARGUMENT=%PLATFORM%
+  - if "%APPVEYOR_BUILD_WORKER_IMAGE%" == "Visual Studio 2017" set VCVARPATH="C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\VC\Auxiliary\Build\vcvars64.bat"
   - echo "%VCVARPATH% %VCARGUMENT%"
   - "%VCVARPATH% %VCARGUMENT%"
   - ps: if($env:Platform -eq "x64"){Start-FileDownload 'http://repo.continuum.io/miniconda/Miniconda3-latest-Windows-x86_64.exe' C:\Miniconda.exe; echo "Done"}
@@ -29,11 +31,17 @@ install:
   - conda config --set always_yes yes --set changeps1 no
   - conda update -q conda
   - conda info -a
-  - conda install gtest cmake -c conda-forge
-  - conda install xtl==0.3.4 -c conda-forge
-  - cmake -G "NMake Makefiles" -D CMAKE_INSTALL_PREFIX=%MINICONDA%\\LIBRARY -DBUILD_TESTS=ON .
-  - nmake test_xtensor
+  - conda env create --file environment-dev.yml
+  - CALL conda.bat activate xtensor
+  - conda install gtest=1.10.0 -c conda-forge
+  - ps: if($env:APPVEYOR_BUILD_WORKER_IMAGE -eq "Visual Studio 2015") {
+        cmake -G "NMake Makefiles" -DCMAKE_INSTALL_PREFIX=%MINICONDA%\\LIBRARY -DBUILD_TESTS=ON -DXTENSOR_USE_XSIMD=ON -DCMAKE_BUILD_TYPE=RELEASE .
+        }
+        else {
+        cmake -G "NMake Makefiles" -D CMAKE_INSTALL_PREFIX=%MINICONDA%\\LIBRARY -DBUILD_TESTS=ON -DDISABLE_VS2017=ON -DCMAKE_BUILD_TYPE=RELEASE .
+        }
+  - nmake test_xtensor_lib
   - cd test
 
 build_script:
-  - .\test_xtensor
+  - .\test_xtensor_lib

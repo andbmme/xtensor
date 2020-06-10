@@ -4,6 +4,9 @@
 
    The full license is in the file LICENSE, distributed with this software.
 
+.. _lazy-evaluation:
+
+
 Expressions and lazy evaluation
 ===============================
 
@@ -24,12 +27,12 @@ more complex expressions:
     auto f2 = w + 2 * cos(f);
 
 The expression engine avoids the evaluation of intermediate results and their storage in temporary arrays, so you can achieve the same performance as if you had written
-a simple loop. Assuming ``x``, ``y`` and ``z`` are one-dimensional arrays of length ``n``, 
+a simple loop. Assuming ``x``, ``y`` and ``z`` are one-dimensional arrays of length ``n``,
 
 .. code::
 
     xt::xarray<double> res = x + y * sin(z)
-   
+
 will produce quite the same assembly as the following loop:
 
 .. code::
@@ -68,8 +71,8 @@ and the size of the data, it might be convenient to store the result of the expr
 Forcing evaluation
 ------------------
 
-If you have to force the evaluation of an xexpression for some reason (for example, you want to have all results in memory to perform a sort, or use external BLAS functions) then you can use ``xt::eval`` on an xexpression. 
-Evaluating will either return an rvalue to a newly allocated container in the case of a xexpression, or a reference to a container in case you are evaluating a ``xarray`` or ``xtensor``. Note that, in order to avoid copies, you should use an universal reference on the lefthand side (``auto&&``). For example:
+If you have to force the evaluation of an xexpression for some reason (for example, you want to have all results in memory to perform a sort or use external BLAS functions) then you can use ``xt::eval`` on an xexpression.
+Evaluating will either return a *rvalue* to a newly allocated container in the case of an xexpression, or a reference to a container in case you are evaluating a ``xarray`` or ``xtensor``. Note that, in order to avoid copies, you should use a universal reference on the lefthand side (``auto&&``). For example:
 
 .. code::
 
@@ -84,11 +87,11 @@ Broadcasting
 ------------
 
 The number of dimensions of an ``xexpression`` and the sizes of these dimensions are provided by the ``shape()`` method, which returns a sequence of unsigned integers
-specifying the size of each dimension. We can operate on expressions of different shapes of dimensions in a elementwise fashion. Broadcasting rules of `xtensor` are
+specifying the size of each dimension. We can operate on expressions of different shapes of dimensions in an elementwise fashion. Broadcasting rules of `xtensor` are
 similar to those of Numpy_ and libdynd_.
 
 In an operation involving two arrays of different dimensions, the array with the lesser dimensions is broadcast across the leading dimensions of the other.
-For example, if ``A`` has shape ``(2, 3)``, and ``B`` has shape ``(4, 2, 3)``, the result of a broadcasted operation with ``A`` and ``B`` has shape ``(4, 2, 3)``.
+For example, if ``A`` has shape ``(2, 3)``, and ``B`` has shape ``(4, 2, 3)``, the result of a broadcast operation with ``A`` and ``B`` has shape ``(4, 2, 3)``.
 
 .. code::
 
@@ -116,6 +119,40 @@ in the previous example, so the broadcasting happens as follows:
     ---------
     (4, 2, 3) # Result
 
+Accessing elements
+------------------
+
+You can access the elements of any ``xexpression`` with ``operator()``:
+
+.. code::
+
+    #include "xtensor/xarray.hpp"
+
+    xt::xarray<double> a = {{1., 2., 3.}, {4., 5., 6.}};
+    auto f = 2 * a;
+
+    double d1 = a(0, 2);
+    double d2 = f(1, 2);
+
+It is possible to call ``operator()`` with fewer or more arguments than the number of dimensions
+of the expression:
+
+- if ``operator()`` is called with too many arguments, we drops the most left ones
+- if ``operator()`` is called with too few arguments, we prepend them with ``0`` values until
+  we match the number of dimensions
+
+.. code::
+
+    #include "xtensor/xarray.hpp"
+
+    xt::xarray<double> a = {{1., 2., 3.}, {4., 5., 6.}};
+
+    double d1 = a(2); // equivalent to a(0, 2)
+    double d2 = a(1, 1, 2) // equivalent to a(1, 2)
+
+The reason for this is that it is the one rule that ensures ``(a + b)(i0, ..., in) = a(i0, ..., in) + b(i0, ..., in)``,
+i.e. commutativity of element access and broadcasting.
+
 Expression interface
 --------------------
 
@@ -124,7 +161,7 @@ All ``xexpression`` s in `xtensor` provide at least the following interface:
 Shape
 ~~~~~
 
-- ``dimension()`` returns the number of dimension of the expression.
+- ``dimension()`` returns the number of dimensions of the expression.
 - ``shape()`` returns the shape of the expression.
 
 .. code::
@@ -132,20 +169,24 @@ Shape
     #include <vector>
     #include "xtensor/xarray.hpp"
 
-    std::vector<size_t> shape = {3, 2, 4};
-    xt::xarray<double> a(shape);
+    using array_type = xt::xarray<double>;
+    using shape_type = array_type::shape_type;
+    shape_type shape = {3, 2, 4};
+    array_type a(shape);
     size_t d = a.dimension();
-    const std::vector<size_t>& s = a.shape();
+    const shape_type& s = a.shape();
     bool res = (d == shape.size()) && (s == shape);
     // => res = true
 
 Element access
 ~~~~~~~~~~~~~~
 
-- ``operator()`` is an access operator which can take multiple integral arguments or none.
-- ``at()`` is similar to ``operator()`` but checks that its number of arguments does not exceed the number of dimensions, and performs bounds check. This should not be used where you expect ``operator()`` to perform broadcasting.
-- ``operator[]`` has two overloads: one that takes a single integral argument and is equivalent to the call of ``operator()`` with one argument, and one with a single multi-index argument, which can be of size determined at runtime. This operator also supports braced initializer arguments.
+- ``operator()`` is an access operator that can take multiple integral arguments or none.
+- ``at()`` is similar to ``operator()`` but checks that its number of arguments does not exceed the number of dimensions, and performs bounds checking. This should not be used where you expect ``operator()`` to perform broadcasting.
+- ``operator[]`` has two overloads: one that takes a single integral argument and is equivalent to the call of ``operator()`` with one argument, and one with a single multi-index argument, which can be of a size determined at runtime. This operator also supports braced initializer arguments.
 - ``element()`` is an access operator which takes a pair of iterators on a container of indices.
+- ``periodic()`` is the equivalent of ``operator()`` that can deal with periodic indices (for example ``-1`` for the last item along an axis).
+- ``in_bounds()`` returns a ``bool`` that is ``true`` only if indices are valid for the array.
 
 .. code::
 
@@ -163,12 +204,10 @@ Iterators
 ~~~~~~~~~
 
 - ``begin()`` and ``end()`` return instances of ``xiterator`` which can be used to iterate over all the elements of the expression. The layout of the iteration can be specified
-  through the ``layout_type`` template parameter, accepted values are ``layout_type::row_major`` and ``layout_type::column_major``. If not specified, ``DEFAULT_LAYOUT`` is used.
+  through the ``layout_type`` template parameter, accepted values are ``layout_type::row_major`` and ``layout_type::column_major``. If not specified, ``XTENSOR_DEFAULT_TRAVERSAL`` is used.
   This iterator pair permits to use algorithms of the STL with ``xexpression`` as if they were simple containers.
-- ``begin(shape)`` and ``end(shape)`` are similar but take a *broadcasting shape* as an argument. Elements are iterated upon in ``DEFAULT_LAYOUT`` if no ``layout_type`` template
-  parameter is specified. Certain dimensions are repeated to match the provided shape as per the rules described above.
-- ``rbegin()`` and ``rend()`` return instances of ``xiterator`` which can be used to iterate over all the elements of the reversed expression. As ``begin()`` and ``end()``, the
-  layout of the iteration can be specified through the ``layout_type`` parameter.
+- ``begin(shape)`` and ``end(shape)`` are similar but take a *broadcasting shape* as an argument. Elements are iterated upon in ``XTENSOR_DEFAULT_TRAVERSAL`` if no ``layout_type`` template parameter is specified. Certain dimensions are repeated to match the provided shape as per the rules described above.
+- ``rbegin()`` and ``rend()`` return instances of ``xiterator`` which can be used to iterate over all the elements of the reversed expression. As ``begin()`` and ``end()``, the layout of the iteration can be specified through the ``layout_type`` parameter.
 - ``rbegin(shape)`` and ``rend(shape)`` are the reversed counterpart of ``begin(shape)`` and ``end(shape)``.
 
 .. _NumPy: http://www.numpy.org

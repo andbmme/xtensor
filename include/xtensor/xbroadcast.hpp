@@ -1,5 +1,6 @@
 /***************************************************************************
-* Copyright (c) 2016, Johan Mabille, Sylvain Corlay and Wolf Vollprecht    *
+* Copyright (c) Johan Mabille, Sylvain Corlay and Wolf Vollprecht          *
+* Copyright (c) QuantStack                                                 *
 *                                                                          *
 * Distributed under the terms of the BSD 3-Clause License.                 *
 *                                                                          *
@@ -17,11 +18,14 @@
 #include <type_traits>
 #include <utility>
 
-#include "xtl/xsequence.hpp"
+#include <xtl/xsequence.hpp>
 
+#include "xaccessible.hpp"
 #include "xexpression.hpp"
 #include "xiterable.hpp"
+#include "xscalar.hpp"
 #include "xstrides.hpp"
+#include "xtensor_config.hpp"
 #include "xutils.hpp"
 
 namespace xt
@@ -32,15 +36,40 @@ namespace xt
      *************/
 
     template <class E, class S>
-    auto broadcast(E&& e, const S& s) noexcept;
+    auto broadcast(E&& e, const S& s);
 
 #ifdef X_OLD_CLANG
     template <class E, class I>
-    auto broadcast(E&& e, std::initializer_list<I> s) noexcept;
+    auto broadcast(E&& e, std::initializer_list<I> s);
 #else
     template <class E, class I, std::size_t L>
-    auto broadcast(E&& e, const I (&s)[L]) noexcept;
+    auto broadcast(E&& e, const I (&s)[L]);
 #endif
+
+    /*************************
+     * xbroadcast extensions *
+     *************************/
+
+    namespace extension
+    {
+        template <class Tag, class CT, class X>
+        struct xbroadcast_base_impl;
+
+        template <class CT, class X>
+        struct xbroadcast_base_impl<xtensor_expression_tag, CT, X>
+        {
+            using type = xtensor_empty_base;
+        };
+
+        template <class CT, class X>
+        struct xbroadcast_base
+            : xbroadcast_base_impl<xexpression_tag_t<CT>, CT, X>
+        {
+        };
+
+        template <class CT, class X>
+        using xbroadcast_base_t = typename xbroadcast_base<CT, X>::type;
+    }
 
     /**************
      * xbroadcast *
@@ -58,6 +87,43 @@ namespace xt
         using stepper = const_stepper;
     };
 
+    template <class CT, class X>
+    struct xcontainer_inner_types<xbroadcast<CT, X>>
+    {
+        using xexpression_type = std::decay_t<CT>;
+        using reference = typename xexpression_type::const_reference;
+        using const_reference = typename xexpression_type::const_reference;
+        using size_type = typename xexpression_type::size_type;
+    };
+
+    /*****************************
+     * linear_begin / linear_end *
+     *****************************/
+
+    template <class CT, class X>
+    XTENSOR_CONSTEXPR_RETURN auto linear_begin(xbroadcast<CT, X>& c) noexcept
+    {
+        return linear_begin(c.expression());
+    }
+
+    template <class CT, class X>
+    XTENSOR_CONSTEXPR_RETURN auto linear_end(xbroadcast<CT, X>& c) noexcept
+    {
+        return linear_end(c.expression());
+    }
+
+    template <class CT, class X>
+    XTENSOR_CONSTEXPR_RETURN auto linear_begin(const xbroadcast<CT, X>& c) noexcept
+    {
+        return linear_begin(c.expression());
+    }
+
+    template <class CT, class X>
+    XTENSOR_CONSTEXPR_RETURN auto linear_end(const xbroadcast<CT, X>& c) noexcept
+    {
+        return linear_end(c.expression());
+    }
+
     /**
      * @class xbroadcast
      * @brief Broadcasted xexpression to a specified shape.
@@ -72,20 +138,26 @@ namespace xt
      * @sa broadcast
      */
     template <class CT, class X>
-    class xbroadcast : public xexpression<xbroadcast<CT, X>>,
-                       public xconst_iterable<xbroadcast<CT, X>>
+    class xbroadcast : public xsharable_expression<xbroadcast<CT, X>>,
+                       public xconst_iterable<xbroadcast<CT, X>>,
+                       public xconst_accessible<xbroadcast<CT, X>>,
+                       public extension::xbroadcast_base_t<CT, X>
     {
     public:
 
         using self_type = xbroadcast<CT, X>;
         using xexpression_type = std::decay_t<CT>;
+        using accessible_base = xconst_accessible<self_type>;
+        using extension_base = extension::xbroadcast_base_t<CT, X>;
+        using expression_tag = typename extension_base::expression_tag;
 
+        using inner_types = xcontainer_inner_types<self_type>;
         using value_type = typename xexpression_type::value_type;
-        using reference = typename xexpression_type::reference;
-        using const_reference = typename xexpression_type::const_reference;
-        using pointer = typename xexpression_type::pointer;
+        using reference = typename inner_types::reference;
+        using const_reference = typename inner_types::const_reference;
+        using pointer = typename xexpression_type::const_pointer;
         using const_pointer = typename xexpression_type::const_pointer;
-        using size_type = typename xexpression_type::size_type;
+        using size_type = typename inner_types::size_type;
         using difference_type = typename xexpression_type::difference_type;
 
         using iterable_base = xconst_iterable<self_type>;
@@ -95,43 +167,53 @@ namespace xt
         using stepper = typename iterable_base::stepper;
         using const_stepper = typename iterable_base::const_stepper;
 
-        static constexpr layout_type static_layout = xexpression_type::static_layout;
-        //static constexpr bool contiguous_layout = xexpression_type::contiguous_layout;
+        using bool_load_type = typename xexpression_type::bool_load_type;
+
+        static constexpr layout_type static_layout = layout_type::dynamic;
         static constexpr bool contiguous_layout = false;
 
         template <class CTA, class S>
-        xbroadcast(CTA&& e, S&& s) noexcept;
+        xbroadcast(CTA&& e, const S& s);
 
-        size_type size() const noexcept;
-        size_type dimension() const noexcept;
+        template <class CTA>
+        xbroadcast(CTA&& e, shape_type&& s);
+
+        using accessible_base::size;
         const inner_shape_type& shape() const noexcept;
         layout_type layout() const noexcept;
+        bool is_contiguous() const noexcept;
+        using accessible_base::shape;
 
         template <class... Args>
         const_reference operator()(Args... args) const;
 
         template <class... Args>
-        const_reference at(Args... args) const;
-
-        template <class S>
-        disable_integral_t<S, const_reference> operator[](const S& index) const;
-        template <class I>
-        const_reference operator[](std::initializer_list<I> index) const;
-        const_reference operator[](size_type i) const;
+        const_reference unchecked(Args... args) const;
 
         template <class It>
-        const_reference element(It, It last) const;
+        const_reference element(It first, It last) const;
+
+        const xexpression_type& expression() const noexcept;
 
         template <class S>
-        bool broadcast_shape(S& shape) const;
+        bool broadcast_shape(S& shape, bool reuse_cache = false) const;
 
         template <class S>
-        bool is_trivial_broadcast(const S& strides) const noexcept;
+        bool has_linear_assign(const S& strides) const noexcept;
 
         template <class S>
         const_stepper stepper_begin(const S& shape) const noexcept;
         template <class S>
         const_stepper stepper_end(const S& shape, layout_type l) const noexcept;
+
+        template <class E, class XCT = CT, class = std::enable_if_t<xt::is_xscalar<XCT>::value>>
+        void assign_to(xexpression<E>& e) const;
+
+        template <class E>
+        using rebind_t = xbroadcast<E, X>;
+
+        template <class E>
+        rebind_t<E> build_broadcast(E&& e) const;
 
     private:
 
@@ -154,28 +236,28 @@ namespace xt
      * depending on whether \p e is an lvalue or an rvalue.
      */
     template <class E, class S>
-    inline auto broadcast(E&& e, const S& s) noexcept
+    inline auto broadcast(E&& e, const S& s)
     {
-        using broadcast_type = xbroadcast<const_xclosure_t<E>, S>;
-        using shape_type = typename broadcast_type::shape_type;
-        return broadcast_type(std::forward<E>(e), xtl::forward_sequence<shape_type>(s));
+        using shape_type = filter_fixed_shape_t<std::decay_t<S>>;
+        using broadcast_type = xbroadcast<const_xclosure_t<E>, shape_type>;
+        return broadcast_type(std::forward<E>(e), xtl::forward_sequence<shape_type, decltype(s)>(s));
     }
 
 #ifdef X_OLD_CLANG
     template <class E, class I>
-    inline auto broadcast(E&& e, std::initializer_list<I> s) noexcept
+    inline auto broadcast(E&& e, std::initializer_list<I> s)
     {
         using broadcast_type = xbroadcast<const_xclosure_t<E>, std::vector<std::size_t>>;
         using shape_type = typename broadcast_type::shape_type;
-        return broadcast_type(std::forward<E>(e), xtl::forward_sequence<shape_type>(s));
+        return broadcast_type(std::forward<E>(e), xtl::forward_sequence<shape_type, decltype(s)>(s));
     }
 #else
     template <class E, class I, std::size_t L>
-    inline auto broadcast(E&& e, const I (&s)[L]) noexcept
+    inline auto broadcast(E&& e, const I (&s)[L])
     {
         using broadcast_type = xbroadcast<const_xclosure_t<E>, std::array<std::size_t, L>>;
         using shape_type = typename broadcast_type::shape_type;
-        return broadcast_type(std::forward<E>(e), xtl::forward_sequence<shape_type>(s));
+        return broadcast_type(std::forward<E>(e), xtl::forward_sequence<shape_type, decltype(s)>(s));
     }
 #endif
 
@@ -196,8 +278,29 @@ namespace xt
      */
     template <class CT, class X>
     template <class CTA, class S>
-    inline xbroadcast<CT, X>::xbroadcast(CTA&& e, S&& s) noexcept
-        : m_e(std::forward<CTA>(e)), m_shape(std::forward<S>(s))
+    inline xbroadcast<CT, X>::xbroadcast(CTA&& e, const S& s)
+        : m_e(std::forward<CTA>(e))
+    {
+        if (s.size() < m_e.dimension())
+        {
+            XTENSOR_THROW(xt::broadcast_error, "Broadcast shape has fewer elements than original expression.");
+        }
+        xt::resize_container(m_shape, s.size());
+        std::copy(s.begin(), s.end(), m_shape.begin());
+        xt::broadcast_shape(m_e.shape(), m_shape);
+    }
+
+    /**
+     * Constructs an xbroadcast expression broadcasting the specified
+     * \ref xexpression to the given shape
+     *
+     * @param e the expression to broadcast
+     * @param s the shape to apply
+     */
+    template <class CT, class X>
+    template <class CTA>
+    inline xbroadcast<CT, X>::xbroadcast(CTA&& e, shape_type&& s)
+        : m_e(std::forward<CTA>(e)), m_shape(std::move(s))
     {
         xt::broadcast_shape(m_e.shape(), m_shape);
     }
@@ -206,24 +309,7 @@ namespace xt
     /**
      * @name Size and shape
      */
-    /**
-     * Returns the size of the expression.
-     */
-    template <class CT, class X>
-    inline auto xbroadcast<CT, X>::size() const noexcept -> size_type
-    {
-        return compute_size(shape());
-    }
-
-    /**
-     * Returns the number of dimensions of the expression.
-     */
-    template <class CT, class X>
-    inline auto xbroadcast<CT, X>::dimension() const noexcept -> size_type
-    {
-        return m_shape.size();
-    }
-
+    //@{
     /**
      * Returns the shape of the expression.
      */
@@ -241,11 +327,19 @@ namespace xt
     {
         return m_e.layout();
     }
+
+    template <class CT, class X>
+    inline bool xbroadcast<CT, X>::is_contiguous() const noexcept
+    {
+        return false;
+    }
+
     //@}
 
     /**
      * @name Data
      */
+    //@{
     /**
      * Returns a constant reference to the element at the specified position in the expression.
      * @param args a list of indices specifying the position in the function. Indices
@@ -256,51 +350,33 @@ namespace xt
     template <class... Args>
     inline auto xbroadcast<CT, X>::operator()(Args... args) const -> const_reference
     {
-        return detail::get_element(m_e, args...);
-    }
-
-    /**
-     * Returns a constant reference to the element at the specified position in the expression,
-     * after dimension and bounds checking.
-     * @param args a list of indices specifying the position in the function. Indices
-     * must be unsigned integers, the number of indices should be equal to the number of dimensions
-     * of the expression.
-     * @exception std::out_of_range if the number of argument is greater than the number of dimensions
-     * or if indices are out of bounds.
-     */
-    template <class CT, class X>
-    template <class... Args>
-    inline auto xbroadcast<CT, X>::at(Args... args) const -> const_reference
-    {
-        check_access(shape(), static_cast<size_type>(args)...);
-        return this->operator()(args...);
+        return m_e(args...);
     }
 
     /**
      * Returns a constant reference to the element at the specified position in the expression.
-     * @param index a sequence of indices specifying the position in the function. Indices
-     * must be unsigned integers, the number of indices in the sequence should be equal or greater
-     * than the number of dimensions of the container.
+     * @param args a list of indices specifying the position in the expression. Indices
+     * must be unsigned integers, the number of indices must be equal to the number of
+     * dimensions of the expression, else the behavior is undefined.
+     *
+     * @warning This method is meant for performance, for expressions with a dynamic
+     * number of dimensions (i.e. not known at compile time). Since it may have
+     * undefined behavior (see parameters), operator() should be prefered whenever
+     * it is possible.
+     * @warning This method is NOT compatible with broadcasting, meaning the following
+     * code has undefined behavior:
+     * \code{.cpp}
+     * xt::xarray<double> a = {{0, 1}, {2, 3}};
+     * xt::xarray<double> b = {0, 1};
+     * auto fd = a + b;
+     * double res = fd.uncheked(0, 1);
+     * \endcode
      */
     template <class CT, class X>
-    template <class S>
-    inline auto xbroadcast<CT, X>::operator[](const S& index) const
-        -> disable_integral_t<S, const_reference>
+    template <class... Args>
+    inline auto xbroadcast<CT, X>::unchecked(Args... args) const -> const_reference
     {
-        return element(index.cbegin(), index.cend());
-    }
-
-    template <class CT, class X>
-    template <class I>
-    inline auto xbroadcast<CT, X>::operator[](std::initializer_list<I> index) const -> const_reference
-    {
-        return element(index.begin(), index.end());
-    }
-
-    template <class CT, class X>
-    inline auto xbroadcast<CT, X>::operator[](size_type i) const -> const_reference
-    {
-        return operator()(i);
+        return this->operator()(args...);
     }
 
     /**
@@ -314,7 +390,16 @@ namespace xt
     template <class It>
     inline auto xbroadcast<CT, X>::element(It, It last) const -> const_reference
     {
-        return m_e.element(last - dimension(), last);
+        return m_e.element(last - this->dimension(), last);
+    }
+
+    /**
+     * Returns a constant reference to the underlying expression of the broadcast expression.
+     */
+    template <class CT, class X>
+    inline auto xbroadcast<CT, X>::expression() const noexcept -> const xexpression_type&
+    {
+        return m_e;
     }
     //@}
 
@@ -325,27 +410,28 @@ namespace xt
     /**
      * Broadcast the shape of the function to the specified parameter.
      * @param shape the result shape
+     * @param reuse_cache parameter for internal optimization
      * @return a boolean indicating whether the broadcasting is trivial
      */
     template <class CT, class X>
     template <class S>
-    inline bool xbroadcast<CT, X>::broadcast_shape(S& shape) const
+    inline bool xbroadcast<CT, X>::broadcast_shape(S& shape, bool) const
     {
         return xt::broadcast_shape(m_shape, shape);
     }
 
     /**
-     * Compares the specified strides with those of the container to see whether
-     * the broadcasting is trivial.
-     * @return a boolean indicating whether the broadcasting is trivial
+     * Checks whether the xbroadcast can be linearly assigned to an expression
+     * with the specified strides.
+     * @return a boolean indicating whether a linear assign is possible
      */
     template <class CT, class X>
     template <class S>
-    inline bool xbroadcast<CT, X>::is_trivial_broadcast(const S& strides) const noexcept
+    inline bool xbroadcast<CT, X>::has_linear_assign(const S& strides) const noexcept
     {
-        return dimension() == m_e.dimension() &&
+        return this->dimension() == m_e.dimension() &&
             std::equal(m_shape.cbegin(), m_shape.cend(), m_e.shape().cbegin()) &&
-            m_e.is_trivial_broadcast(strides);
+            m_e.has_linear_assign(strides);
     }
     //@}
 
@@ -363,6 +449,22 @@ namespace xt
     {
         // Could check if (broadcastable(shape, m_shape)
         return m_e.stepper_end(shape, l);
+    }
+
+    template <class CT, class X>
+    template <class E, class XCT, class>
+    inline void xbroadcast<CT, X>::assign_to(xexpression<E>& e) const
+    {
+        auto& ed = e.derived_cast();
+        ed.resize(m_shape);
+        std::fill(ed.begin(), ed.end(), m_e());
+    }
+
+    template <class CT, class X>
+    template <class E>
+    inline auto xbroadcast<CT, X>::build_broadcast(E&& e) const -> rebind_t<E>
+    {
+        return rebind_t<E>(std::forward<E>(e), inner_shape_type(m_shape));
     }
 }
 

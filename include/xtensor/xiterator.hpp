@@ -1,5 +1,6 @@
 /***************************************************************************
-* Copyright (c) 2016, Johan Mabille, Sylvain Corlay and Wolf Vollprecht    *
+* Copyright (c) Johan Mabille, Sylvain Corlay and Wolf Vollprecht          *
+* Copyright (c) QuantStack                                                 *
 *                                                                          *
 * Distributed under the terms of the BSD 3-Clause License.                 *
 *                                                                          *
@@ -13,12 +14,16 @@
 #include <array>
 #include <cstddef>
 #include <iterator>
+#include <numeric>
 #include <vector>
 
-#include "xtl/xsequence.hpp"
+#include <xtl/xiterator_base.hpp>
+#include <xtl/xmeta_utils.hpp>
+#include <xtl/xsequence.hpp>
 
 #include "xexception.hpp"
 #include "xlayout.hpp"
+#include "xshape.hpp"
 #include "xutils.hpp"
 
 namespace xt
@@ -30,6 +35,9 @@ namespace xt
 
     template <class CT>
     class xscalar;
+
+    template <bool is_const, class CT>
+    class xscalar_stepper;
 
     namespace detail
     {
@@ -61,18 +69,28 @@ namespace xt
     template <class C>
     using get_stepper_iterator = typename detail::get_stepper_iterator_impl<C>::type;
 
+    /********************************
+     * xindex_type_t implementation *
+     ********************************/
+
     namespace detail
     {
         template <class ST>
         struct index_type_impl
         {
-            using type = std::vector<typename ST::value_type>;
+            using type = dynamic_shape<typename ST::value_type>;
         };
 
         template <class V, std::size_t L>
         struct index_type_impl<std::array<V, L>>
         {
             using type = std::array<V, L>;
+        };
+
+        template <std::size_t... I>
+        struct index_type_impl<fixed_shape<I...>>
+        {
+            using type = std::array<std::size_t, sizeof...(I)>;
         };
     }
 
@@ -88,18 +106,22 @@ namespace xt
     {
     public:
 
-        using container_type = C;
+        using storage_type = C;
         using subiterator_type = get_stepper_iterator<C>;
         using subiterator_traits = std::iterator_traits<subiterator_type>;
         using value_type = typename subiterator_traits::value_type;
         using reference = typename subiterator_traits::reference;
         using pointer = typename subiterator_traits::pointer;
         using difference_type = typename subiterator_traits::difference_type;
-        using size_type = typename container_type::size_type;
-        using shape_type = typename container_type::shape_type;
+        using size_type = typename storage_type::size_type;
+        using shape_type = typename storage_type::shape_type;
+        using simd_value_type = xt_simd::simd_type<value_type>;
+
+        template <class requested_type>
+        using simd_return_type = xt_simd::simd_return_type<value_type, requested_type>;
 
         xstepper() = default;
-        xstepper(container_type* c, subiterator_type it, size_type offset) noexcept;
+        xstepper(storage_type* c, subiterator_type it, size_type offset) noexcept;
 
         reference operator*() const;
 
@@ -111,26 +133,27 @@ namespace xt
         void to_begin();
         void to_end(layout_type l);
 
-        bool equal(const xstepper& rhs) const;
+        template <class T>
+        simd_return_type<T> step_simd();
+
+        void step_leading();
+
+        template <class R>
+        void store_simd(const R& vec);
 
     private:
 
-        container_type* p_c;
+        storage_type* p_c;
         subiterator_type m_it;
         size_type m_offset;
     };
 
-    template <class C>
-    bool operator==(const xstepper<C>& lhs,
-                    const xstepper<C>& rhs);
-
-    template <class C>
-    bool operator!=(const xstepper<C>& lhs,
-                    const xstepper<C>& rhs);
-
     template <layout_type L>
     struct stepper_tools
     {
+        // For performance reasons, increment_stepper and decrement_stepper are
+        // specialized for the case where n=1, which underlies operator++ and
+        // operator-- on xiterators.
 
         template <class S, class IT, class ST>
         static void increment_stepper(S& stepper,
@@ -141,13 +164,25 @@ namespace xt
         static void decrement_stepper(S& stepper,
                                       IT& index,
                                       const ST& shape);
+
+        template <class S, class IT, class ST>
+        static void increment_stepper(S& stepper,
+                                      IT& index,
+                                      const ST& shape,
+                                      typename S::size_type n);
+
+        template <class S, class IT, class ST>
+        static void decrement_stepper(S& stepper,
+                                      IT& index,
+                                      const ST& shape,
+                                      typename S::size_type n);
     };
 
     /********************
      * xindexed_stepper *
      ********************/
 
-    template <class E, bool is_const = true>
+    template <class E, bool is_const>
     class xindexed_stepper
     {
     public:
@@ -181,8 +216,6 @@ namespace xt
         void to_begin();
         void to_end(layout_type l);
 
-        bool equal(const self_type& rhs) const;
-
     private:
 
         xexpression_type* p_e;
@@ -190,13 +223,17 @@ namespace xt
         size_type m_offset;
     };
 
-    template <class C, bool is_const>
-    bool operator==(const xindexed_stepper<C, is_const>& lhs,
-                    const xindexed_stepper<C, is_const>& rhs);
+    template <class T>
+    struct is_indexed_stepper
+    {
+        static const bool value = false;
+    };
 
-    template <class C, bool is_const>
-    bool operator!=(const xindexed_stepper<C, is_const>& lhs,
-                    const xindexed_stepper<C, is_const>& rhs);
+    template <class T, bool B>
+    struct is_indexed_stepper<xindexed_stepper<T, B>>
+    {
+        static const bool value = true;
+    };
 
     /*************
      * xiterator *
@@ -241,20 +278,25 @@ namespace xt
         struct LAYOUT_FORBIDEN_FOR_XITERATOR;
     }
 
-    template <class It, class S, layout_type L>
-    class xiterator : detail::shape_storage<S>
+    template <class St, class S, layout_type L>
+    class xiterator : public xtl::xrandom_access_iterator_base<xiterator<St, S, L>,
+                                                               typename St::value_type,
+                                                               typename St::difference_type,
+                                                               typename St::pointer,
+                                                               typename St::reference>,
+                      private detail::shape_storage<S>
     {
     public:
 
-        using self_type = xiterator<It, S, L>;
+        using self_type = xiterator<St, S, L>;
 
-        using subiterator_type = It;
-        using value_type = typename subiterator_type::value_type;
-        using reference = typename subiterator_type::reference;
-        using pointer = typename subiterator_type::pointer;
-        using difference_type = typename subiterator_type::difference_type;
-        using size_type = typename subiterator_type::size_type;
-        using iterator_category = std::bidirectional_iterator_tag;
+        using stepper_type = St;
+        using value_type = typename stepper_type::value_type;
+        using reference = typename stepper_type::reference;
+        using pointer = typename stepper_type::pointer;
+        using difference_type = typename stepper_type::difference_type;
+        using size_type = typename stepper_type::size_type;
+        using iterator_category = std::random_access_iterator_tag;
 
         using private_base = detail::shape_storage<S>;
         using shape_type = typename private_base::shape_type;
@@ -262,64 +304,158 @@ namespace xt
         using index_type = xindex_type_t<shape_type>;
 
         xiterator() = default;
-        xiterator(It it, shape_param_type shape, bool reverse);
+
+        // end_index means either reverse_iterator && !end or !reverse_iterator && end
+        xiterator(St st, shape_param_type shape, bool end_index);
 
         self_type& operator++();
-        self_type operator++(int);
-
         self_type& operator--();
-        self_type operator--(int);
+
+        self_type& operator+=(difference_type n);
+        self_type& operator-=(difference_type n);
+
+        difference_type operator-(const self_type& rhs) const;
 
         reference operator*() const;
         pointer operator->() const;
 
         bool equal(const xiterator& rhs) const;
+        bool less_than(const xiterator& rhs) const;
 
     private:
 
-        subiterator_type m_it;
+        stepper_type m_st;
         index_type m_index;
+        difference_type m_linear_index;
 
         using checking_type = typename detail::LAYOUT_FORBIDEN_FOR_XITERATOR<L>::type;
     };
 
-    template <class It, class S, layout_type L>
-    bool operator==(const xiterator<It, S, L>& lhs,
-                    const xiterator<It, S, L>& rhs);
+    template <class St, class S, layout_type L>
+    bool operator==(const xiterator<St, S, L>& lhs,
+                    const xiterator<St, S, L>& rhs);
 
-    template <class It, class S, layout_type L>
-    bool operator!=(const xiterator<It, S, L>& lhs,
-                    const xiterator<It, S, L>& rhs);
+    template <class St, class S, layout_type L>
+    bool operator<(const xiterator<St, S, L>& lhs,
+                   const xiterator<St, S, L>& rhs);
 
-    /*******************************
-    * trivial_begin / trivial_end *
-    *******************************/
+    /*********************
+     * xbounded_iterator *
+     *********************/
+
+    template <class It, class BIt>
+    class xbounded_iterator : public xtl::xrandom_access_iterator_base<xbounded_iterator<It, BIt>,
+                                                                       typename std::iterator_traits<It>::value_type,
+                                                                       typename std::iterator_traits<It>::difference_type,
+                                                                       typename std::iterator_traits<It>::pointer,
+                                                                       typename std::iterator_traits<It>::reference>
+    {
+    public:
+
+        using self_type = xbounded_iterator<It, BIt>;
+
+        using subiterator_type = It;
+        using bound_iterator_type = BIt;
+        using value_type = typename std::iterator_traits<It>::value_type;
+        using reference = typename std::iterator_traits<It>::reference;
+        using pointer = typename std::iterator_traits<It>::pointer;
+        using difference_type = typename std::iterator_traits<It>::difference_type;
+        using iterator_category = std::random_access_iterator_tag;
+
+        xbounded_iterator() = default;
+        xbounded_iterator(It it, BIt bound_it);
+
+        self_type& operator++();
+        self_type& operator--();
+
+        self_type& operator+=(difference_type n);
+        self_type& operator-=(difference_type n);
+
+        difference_type operator-(const self_type& rhs) const;
+
+        value_type operator*() const;
+
+        bool equal(const self_type& rhs) const;
+        bool less_than(const self_type& rhs) const;
+
+    private:
+
+        subiterator_type m_it;
+        bound_iterator_type m_bound_it;
+    };
+
+    template <class It, class BIt>
+    bool operator==(const xbounded_iterator<It, BIt>& lhs,
+                    const xbounded_iterator<It, BIt>& rhs);
+
+    template <class It, class BIt>
+    bool operator<(const xbounded_iterator<It, BIt>& lhs,
+                   const xbounded_iterator<It, BIt>& rhs);
+
+    /*****************************
+     * linear_begin / linear_end *
+     *****************************/
 
     namespace detail
     {
-        template <class C>
-        constexpr auto trivial_begin(C& c) noexcept
+        template <class C, class = void_t<>>
+        struct has_storage_iterator : std::false_type
         {
-            return c.storage_begin();
-        }
+        };
 
         template <class C>
-        constexpr auto trivial_end(C& c) noexcept
+        struct has_storage_iterator<C, void_t<decltype(std::declval<C>().storage_cbegin())>>
+            : std::true_type
         {
-            return c.storage_end();
-        }
+        };
+    }
 
-        template <class C>
-        constexpr auto trivial_begin(const C& c) noexcept
+    template <class C>
+    XTENSOR_CONSTEXPR_RETURN auto linear_begin(C& c) noexcept
+    {
+        return xtl::mpl::static_if<detail::has_storage_iterator<C>::value>([&](auto self)
         {
-            return c.storage_begin();
-        }
+            return self(c).storage_begin();
+        }, /*else*/ [&](auto self)
+        {
+            return self(c).begin();
+        });
+    }
 
-        template <class C>
-        constexpr auto trivial_end(const C& c) noexcept
+    template <class C>
+    XTENSOR_CONSTEXPR_RETURN auto linear_end(C& c) noexcept
+    {
+        return xtl::mpl::static_if<detail::has_storage_iterator<C>::value>([&](auto self)
         {
-            return c.storage_end();
-        }
+            return self(c).storage_end();
+        }, /*else*/ [&](auto self)
+        {
+            return self(c).end();
+        });
+    }
+
+    template <class C>
+    XTENSOR_CONSTEXPR_RETURN auto linear_begin(const C& c) noexcept
+    {
+        return xtl::mpl::static_if<detail::has_storage_iterator<C>::value>([&](auto self)
+        {
+            return self(c).storage_cbegin();
+        }, /*else*/ [&](auto self)
+        {
+            return self(c).cbegin();
+        });
+    }
+
+    template <class C>
+    XTENSOR_CONSTEXPR_RETURN auto linear_end(const C& c) noexcept
+    {
+        return xtl::mpl::static_if<detail::has_storage_iterator<C>::value>([&](auto self)
+        {
+            return self(c).storage_cend();
+        }, /*else*/ [&](auto self)
+        {
+            return self(c).cend();
+        });
     }
 
     /***************************
@@ -327,7 +463,7 @@ namespace xt
      ***************************/
 
     template <class C>
-    inline xstepper<C>::xstepper(container_type* c, subiterator_type it, size_type offset) noexcept
+    inline xstepper<C>::xstepper(storage_type* c, subiterator_type it, size_type offset) noexcept
         : p_c(c), m_it(it), m_offset(offset)
     {
     }
@@ -343,7 +479,8 @@ namespace xt
     {
         if (dim >= m_offset)
         {
-            m_it += difference_type(n * p_c->strides()[dim - m_offset]);
+            using strides_value_type = typename std::decay_t<decltype(p_c->strides())>::value_type;
+            m_it += difference_type(static_cast<strides_value_type>(n) * p_c->strides()[dim - m_offset]);
         }
     }
 
@@ -352,7 +489,8 @@ namespace xt
     {
         if (dim >= m_offset)
         {
-            m_it -= difference_type(n * p_c->strides()[dim - m_offset]);
+            using strides_value_type = typename std::decay_t<decltype(p_c->strides())>::value_type;
+            m_it -= difference_type(static_cast<strides_value_type>(n) * p_c->strides()[dim - m_offset]);
         }
     }
 
@@ -383,27 +521,56 @@ namespace xt
     template <class C>
     inline void xstepper<C>::to_end(layout_type l)
     {
-        m_it = p_c->data_xend(l);
+        m_it = p_c->data_xend(l, m_offset);
+    }
+
+    namespace detail
+    {
+        template <class It>
+        struct step_simd_invoker
+        {
+            template <class R>
+            static R apply(const It& it)
+            {
+                R reg;
+                reg.load_unaligned(&(*it));
+                return reg;
+            }
+        };
+
+        template <bool is_const, class T, class S, layout_type L>
+        struct step_simd_invoker<xiterator<xscalar_stepper<is_const, T>, S, L>>
+        {
+            template <class R>
+            static R apply(const xiterator<xscalar_stepper<is_const, T>, S, L>& it)
+            {
+                return R(*it);
+            }
+        };
     }
 
     template <class C>
-    inline bool xstepper<C>::equal(const xstepper& rhs) const
+    template <class T>
+    inline auto xstepper<C>::step_simd() -> simd_return_type<T>
     {
-        return p_c == rhs.p_c && m_it == rhs.m_it && m_offset == rhs.m_offset;
+        using simd_type = simd_return_type<T>;
+        simd_type reg = detail::step_simd_invoker<subiterator_type>::template apply<simd_type>(m_it);
+        m_it += xt_simd::revert_simd_traits<simd_type>::size;
+        return reg;
     }
 
     template <class C>
-    inline bool operator==(const xstepper<C>& lhs,
-                           const xstepper<C>& rhs)
+    template <class R>
+    inline void xstepper<C>::store_simd(const R& vec)
     {
-        return lhs.equal(rhs);
+        vec.store_unaligned(&(*m_it));
+        m_it += xt_simd::revert_simd_traits<R>::size;;
     }
 
     template <class C>
-    inline bool operator!=(const xstepper<C>& lhs,
-                           const xstepper<C>& rhs)
+    void xstepper<C>::step_leading()
     {
-        return !(lhs.equal(rhs));
+        ++m_it;
     }
 
     template <>
@@ -434,6 +601,53 @@ namespace xt
         }
         if (i == 0)
         {
+            std::copy(shape.cbegin(), shape.cend(), index.begin());
+            stepper.to_end(layout_type::row_major);
+        }
+    }
+
+    template <>
+    template <class S, class IT, class ST>
+    void stepper_tools<layout_type::row_major>::increment_stepper(S& stepper,
+                                                                  IT& index,
+                                                                  const ST& shape,
+                                                                  typename S::size_type n)
+    {
+        using size_type = typename S::size_type;
+        size_type i = index.size();
+        size_type leading_i = index.size() - 1;
+        while (i != 0 && n != 0)
+        {
+            --i;
+            size_type inc = (i == leading_i) ? n : 1;
+            if (index[i] + inc < shape[i])
+            {
+                index[i] += inc;
+                stepper.step(i, inc);
+                n -= inc;
+                if (i != leading_i || index.size() == 1)
+                {
+                    i = index.size();
+                }
+            }
+            else
+            {
+                if (i == leading_i)
+                {
+                    size_type off = shape[i] - index[i] - 1;
+                    stepper.step(i, off);
+                    n -= off;
+                }
+                index[i] = 0;
+                if (i != 0)
+                {
+                    stepper.reset(i);
+                }
+            }
+        }
+        if (i == 0 && n != 0)
+        {
+            std::copy(shape.cbegin(), shape.cend(), index.begin());
             stepper.to_end(layout_type::row_major);
         }
     }
@@ -472,6 +686,51 @@ namespace xt
 
     template <>
     template <class S, class IT, class ST>
+    void stepper_tools<layout_type::row_major>::decrement_stepper(S& stepper,
+                                                                  IT& index,
+                                                                  const ST& shape,
+                                                                  typename S::size_type n)
+    {
+        using size_type = typename S::size_type;
+        size_type i = index.size();
+        size_type leading_i = index.size() - 1;
+        while (i != 0 && n != 0)
+        {
+            --i;
+            size_type inc = (i == leading_i) ? n : 1;
+            if (index[i] >= inc)
+            {
+                index[i] -= inc;
+                stepper.step_back(i, inc);
+                n -= inc;
+                if (i != leading_i || index.size() == 1)
+                {
+                    i = index.size();
+                }
+            }
+            else
+            {
+                if (i == leading_i)
+                {
+                    size_type off = index[i];
+                    stepper.step_back(i, off);
+                    n -= off;
+                }
+                index[i] = shape[i] - 1;
+                if (i != 0)
+                {
+                    stepper.reset_back(i);
+                }
+            }
+        }
+        if (i == 0 && n != 0)
+        {
+            stepper.to_begin();
+        }
+    }
+
+    template <>
+    template <class S, class IT, class ST>
     void stepper_tools<layout_type::column_major>::increment_stepper(S& stepper,
                                                                      IT& index,
                                                                      const ST& shape)
@@ -499,6 +758,55 @@ namespace xt
         }
         if (i == size)
         {
+            std::copy(shape.cbegin(), shape.cend(), index.begin());
+            stepper.to_end(layout_type::column_major);
+        }
+    }
+
+    template <>
+    template <class S, class IT, class ST>
+    void stepper_tools<layout_type::column_major>::increment_stepper(S& stepper,
+                                                                     IT& index,
+                                                                     const ST& shape,
+                                                                     typename S::size_type n)
+    {
+        using size_type = typename S::size_type;
+        size_type size = index.size();
+        size_type i = 0;
+        size_type leading_i = 0;
+        while (i != size && n != 0)
+        {
+            size_type inc = (i == leading_i) ? n : 1;
+            if (index[i] + inc < shape[i])
+            {
+                index[i] += inc;
+                stepper.step(i, inc);
+                n -= inc;
+                if (i != leading_i || index.size() == 1)
+                {
+                    i = 0;
+                    continue;
+                }
+            }
+            else
+            {
+                if (i == leading_i)
+                {
+                    size_type off = shape[i] - index[i] - 1;
+                    stepper.step(i, off);
+                    n -= off;
+                }
+                index[i] = 0;
+                if (i != size - 1)
+                {
+                    stepper.reset(i);
+                }
+            }
+            ++i;
+        }
+        if (i == size && n != 0)
+        {
+            std::copy(shape.cbegin(), shape.cend(), index.begin());
             stepper.to_end(layout_type::column_major);
         }
     }
@@ -536,6 +844,53 @@ namespace xt
         }
     }
 
+    template <>
+    template <class S, class IT, class ST>
+    void stepper_tools<layout_type::column_major>::decrement_stepper(S& stepper,
+                                                                     IT& index,
+                                                                     const ST& shape,
+                                                                     typename S::size_type n)
+    {
+        using size_type = typename S::size_type;
+        size_type size = index.size();
+        size_type i = 0;
+        size_type leading_i = 0;
+        while (i != size && n != 0)
+        {
+            size_type inc = (i == leading_i) ? n : 1;
+            if (index[i] >= inc)
+            {
+                index[i] -= inc;
+                stepper.step_back(i, inc);
+                n -= inc;
+                if (i != leading_i || index.size() == 1)
+                {
+                    i = 0;
+                    continue;
+                }
+            }
+            else
+            {
+                if (i == leading_i)
+                {
+                    size_type off = index[i];
+                    stepper.step_back(i, off);
+                    n -= off;
+                }
+                index[i] = shape[i] - 1;
+                if (i != size - 1)
+                {
+                    stepper.reset_back(i);
+                }
+            }
+            ++i;
+        }
+        if (i == size && n != 0)
+        {
+            stepper.to_begin();
+        }
+    }
+
     /***********************************
      * xindexed_stepper implementation *
      ***********************************/
@@ -546,7 +901,8 @@ namespace xt
     {
         if (end)
         {
-            to_end(layout_type::row_major);
+            // Note: the layout here doesn't matter (unused) but using default traversal looks more "correct".
+            to_end(XTENSOR_DEFAULT_TRAVERSAL);
         }
     }
 
@@ -561,7 +917,7 @@ namespace xt
     {
         if (dim >= m_offset)
         {
-            m_index[dim - m_offset] += n;
+            m_index[dim - m_offset] += static_cast<typename index_type::value_type>(n);
         }
     }
 
@@ -570,7 +926,7 @@ namespace xt
     {
         if (dim >= m_offset)
         {
-            m_index[dim - m_offset] -= n;
+            m_index[dim - m_offset] -= static_cast<typename index_type::value_type>(n);
         }
     }
 
@@ -601,27 +957,7 @@ namespace xt
     template <class C, bool is_const>
     inline void xindexed_stepper<C, is_const>::to_end(layout_type)
     {
-        m_index = p_e->shape();
-    }
-
-    template <class C, bool is_const>
-    inline bool xindexed_stepper<C, is_const>::equal(const self_type& rhs) const
-    {
-        return p_e == rhs.p_e && m_index == rhs.m_index && m_offset == rhs.m_offset;
-    }
-
-    template <class C, bool is_const>
-    inline bool operator==(const xindexed_stepper<C, is_const>& lhs,
-                           const xindexed_stepper<C, is_const>& rhs)
-    {
-        return lhs.equal(rhs);
-    }
-
-    template <class C, bool is_const>
-    inline bool operator!=(const xindexed_stepper<C, is_const>& lhs,
-                           const xindexed_stepper<C, is_const>& rhs)
-    {
-        return !lhs.equal(rhs);
+        std::copy(p_e->shape().begin(), p_e->shape().end(), m_index.begin());
     }
 
     /****************************
@@ -667,80 +1003,198 @@ namespace xt
         };
     }
 
-    template <class It, class S, layout_type L>
-    inline xiterator<It, S, L>::xiterator(It it, shape_param_type shape, bool reverse)
-        : private_base(shape), m_it(it),
-          m_index(reverse ? xtl::forward_sequence<index_type, const shape_type&>(this->shape())
-                          : xtl::make_sequence<index_type>(this->shape().size(), size_type(0)))
+    template <class St, class S, layout_type L>
+    inline xiterator<St, S, L>::xiterator(St st, shape_param_type shape, bool end_index)
+        : private_base(shape), m_st(st),
+          m_index(end_index ? xtl::forward_sequence<index_type, const shape_type&>(this->shape())
+                            : xtl::make_sequence<index_type>(this->shape().size(), size_type(0))),
+          m_linear_index(0)
     {
-        if (reverse)
+        // end_index means either reverse_iterator && !end or !reverse_iterator && end
+        if (end_index)
         {
-            auto iter_begin = (L == layout_type::row_major) ? m_index.begin() : m_index.begin() + 1;
-            auto iter_end = (L == layout_type::row_major) ? m_index.end() - 1 : m_index.end();
-            std::transform(iter_begin, iter_end, iter_begin, [](const auto& v) { return v - 1; });
+            if (m_index.size() != size_type(0))
+            {
+                auto iter_begin = (L == layout_type::row_major) ? m_index.begin() : m_index.begin() + 1;
+                auto iter_end = (L == layout_type::row_major) ? m_index.end() - 1 : m_index.end();
+                std::transform(iter_begin, iter_end, iter_begin, [](const auto& v) { return v - 1; });
+            }
+            m_linear_index = difference_type(std::accumulate(this->shape().cbegin(), this->shape().cend(),
+                                                             size_type(1), std::multiplies<size_type>()));
         }
     }
 
-    template <class It, class S, layout_type L>
-    inline auto xiterator<It, S, L>::operator++() -> self_type&
+    template <class St, class S, layout_type L>
+    inline auto xiterator<St, S, L>::operator++() -> self_type&
     {
-        stepper_tools<L>::increment_stepper(m_it, m_index, this->shape());
+        stepper_tools<L>::increment_stepper(m_st, m_index, this->shape());
+        ++m_linear_index;
         return *this;
     }
 
-    template <class It, class S, layout_type L>
-    inline auto xiterator<It, S, L>::operator++(int) -> self_type
+    template <class St, class S, layout_type L>
+    inline auto xiterator<St, S, L>::operator--() -> self_type&
     {
-        self_type tmp(*this);
-        ++(*this);
-        return tmp;
-    }
-
-    template <class It, class S, layout_type L>
-    inline auto xiterator<It, S, L>::operator--() -> self_type&
-    {
-        stepper_tools<L>::decrement_stepper(m_it, m_index, this->shape());
+        stepper_tools<L>::decrement_stepper(m_st, m_index, this->shape());
+        --m_linear_index;
         return *this;
     }
 
-    template <class It, class S, layout_type L>
-    inline auto xiterator<It, S, L>::operator--(int) -> self_type
+    template <class St, class S, layout_type L>
+    inline auto xiterator<St, S, L>::operator+=(difference_type n) -> self_type&
     {
-        self_type tmp(*this);
-        --(*this);
-        return tmp;
+        if (n >= 0)
+        {
+            stepper_tools<L>::increment_stepper(m_st, m_index, this->shape(), static_cast<size_type>(n));
+        }
+        else
+        {
+            stepper_tools<L>::decrement_stepper(m_st, m_index, this->shape(), static_cast<size_type>(-n));
+        }
+        m_linear_index += n;
+        return *this;
     }
 
-    template <class It, class S, layout_type L>
-    inline auto xiterator<It, S, L>::operator*() const -> reference
+    template <class St, class S, layout_type L>
+    inline auto xiterator<St, S, L>::operator-=(difference_type n) -> self_type&
     {
-        return *m_it;
+        if (n >= 0)
+        {
+            stepper_tools<L>::decrement_stepper(m_st, m_index, this->shape(), static_cast<size_type>(n));
+        }
+        else
+        {
+            stepper_tools<L>::increment_stepper(m_st, m_index, this->shape(), static_cast<size_type>(-n));
+        }
+        m_linear_index -= n;
+        return *this;
     }
 
-    template <class It, class S, layout_type L>
-    inline auto xiterator<It, S, L>::operator->() const -> pointer
+    template <class St, class S, layout_type L>
+    inline auto xiterator<St, S, L>::operator-(const self_type& rhs) const -> difference_type
     {
-        return &(*m_it);
+        return m_linear_index - rhs.m_linear_index;
     }
 
-    template <class It, class S, layout_type L>
-    inline bool xiterator<It, S, L>::equal(const xiterator& rhs) const
+    template <class St, class S, layout_type L>
+    inline auto xiterator<St, S, L>::operator*() const -> reference
     {
-        return m_it == rhs.m_it && this->shape() == rhs.shape();
+        return *m_st;
     }
 
-    template <class It, class S, layout_type L>
-    inline bool operator==(const xiterator<It, S, L>& lhs,
-                           const xiterator<It, S, L>& rhs)
+    template <class St, class S, layout_type L>
+    inline auto xiterator<St, S, L>::operator->() const -> pointer
+    {
+        return &(*m_st);
+    }
+
+    template <class St, class S, layout_type L>
+    inline bool xiterator<St, S, L>::equal(const xiterator& rhs) const
+    {
+        XTENSOR_ASSERT(this->shape() == rhs.shape());
+        return m_linear_index == rhs.m_linear_index;
+    }
+
+    template <class St, class S, layout_type L>
+    inline bool xiterator<St, S, L>::less_than(const xiterator& rhs) const
+    {
+        XTENSOR_ASSERT(this->shape() == rhs.shape());
+        return m_linear_index < rhs.m_linear_index;
+    }
+
+    template <class St, class S, layout_type L>
+    inline bool operator==(const xiterator<St, S, L>& lhs,
+                           const xiterator<St, S, L>& rhs)
     {
         return lhs.equal(rhs);
     }
 
-    template <class It, class S, layout_type L>
-    inline bool operator!=(const xiterator<It, S, L>& lhs,
-                           const xiterator<It, S, L>& rhs)
+    template <class St, class S, layout_type L>
+    bool operator<(const xiterator<St, S, L>& lhs,
+                   const xiterator<St, S, L>& rhs)
     {
-        return !(lhs.equal(rhs));
+        return lhs.less_than(rhs);
+    }
+
+    /************************************
+     * xbounded_iterator implementation *
+     ************************************/
+
+    template <class It, class BIt>
+    xbounded_iterator<It, BIt>::xbounded_iterator(It it, BIt bound_it)
+        : m_it(it), m_bound_it(bound_it)
+    {
+    }
+
+    template <class It, class BIt>
+    inline auto xbounded_iterator<It, BIt>::operator++() -> self_type&
+    {
+        ++m_it;
+        ++m_bound_it;
+        return *this;
+    }
+
+    template <class It, class BIt>
+    inline auto xbounded_iterator<It, BIt>::operator--() -> self_type&
+    {
+        --m_it;
+        --m_bound_it;
+        return *this;
+    }
+
+    template <class It, class BIt>
+    inline auto xbounded_iterator<It, BIt>::operator+=(difference_type n) -> self_type&
+    {
+        m_it += n;
+        m_bound_it += n;
+        return *this;
+    }
+
+    template <class It, class BIt>
+    inline auto xbounded_iterator<It, BIt>::operator-=(difference_type n) -> self_type&
+    {
+        m_it -= n;
+        m_bound_it -= n;
+        return *this;
+    }
+
+    template <class It, class BIt>
+    inline auto xbounded_iterator<It, BIt>::operator-(const self_type& rhs) const -> difference_type
+    {
+        return m_it - rhs.m_it;
+    }
+
+    template <class It, class BIt>
+    inline auto xbounded_iterator<It, BIt>::operator*() const -> value_type
+    {
+        using type = decltype(*m_bound_it);
+        return (static_cast<type>(*m_it) < *m_bound_it) ? *m_it : static_cast<value_type>((*m_bound_it) - 1);
+    }
+
+    template <class It, class BIt>
+    inline bool xbounded_iterator<It, BIt>::equal(const self_type& rhs) const
+    {
+        return m_it == rhs.m_it && m_bound_it == rhs.m_bound_it;
+    }
+
+    template <class It, class BIt>
+    inline bool xbounded_iterator<It, BIt>::less_than(const self_type& rhs) const
+    {
+        return m_it < rhs.m_it;
+    }
+
+    template <class It, class BIt>
+    inline bool operator==(const xbounded_iterator<It, BIt>& lhs,
+                           const xbounded_iterator<It, BIt>& rhs)
+    {
+        return lhs.equal(rhs);
+    }
+
+    template <class It, class BIt>
+    inline bool operator<(const xbounded_iterator<It, BIt>& lhs,
+                          const xbounded_iterator<It, BIt>& rhs)
+    {
+        return lhs.less_than(rhs);
     }
 }
 

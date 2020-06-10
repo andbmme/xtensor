@@ -12,3 +12,16 @@ Defined in ``xtensor/xexpression.hpp``
 .. doxygenclass:: xt::xexpression
    :project: xtensor
    :members:
+
+.. doxygenclass:: xt::xshared_expression
+   :project: xtensor
+   :members:
+
+.. doxygenfunction:: make_xshared
+   :project: xtensor
+
+.. doxygenfunction:: share(xexpression<E>&)
+   :project: xtensor
+
+.. doxygenfunction:: share(xexpression<E>&&)
+   :project: xtensor
